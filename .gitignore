@@ -1,0 +1,16 @@
+# Ignore files with these extensions
+*.swp
+*.out
+*.DS_Store
+.ipynb_checkpoints/
+
+!plots/
+!data/
+
+plots/*
+data/*
+
+!plots/README.md
+!data/README.md
+!plots/example/
+
