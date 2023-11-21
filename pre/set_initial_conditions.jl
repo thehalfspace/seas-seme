@@ -26,9 +26,9 @@ function set_initial_conditions(fault_y, out_path)
 	p3 = 17.0e3
 	p4 = 20.0e3
 	
-	#if p4 > fault_depth
-	#	@error("Check the initial conditions wrt fault depth")
-	#end
+	if p4 > fault_depth
+		@error("Check the initial conditions wrt fault depth")
+	end
 
 	# Transform fault_y to earth coordinates: Top surface = 0 km
 	fy_trans = abs.(fault_y .- maximum(fault_y))

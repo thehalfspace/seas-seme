@@ -31,7 +31,9 @@ Under development.
 
 ## Quickstart guide
 1. Install Julia >= 1.1 (preferably the latest version).
-2. Run `install_dependencies.jl` script to install the specific packages.
+2. Activate the virtual environment (in the terminal):
+    - `julia`. Type `]` to go to package manager.
+    -  `activate seas-env`
 3. Open `run.jl` and edit the output file name and the resolution of the problem.
 4. Run `run.jl` from the terminal or IDE of your choice.
 5. The output files are saved in `data/$(simulation_name)`.

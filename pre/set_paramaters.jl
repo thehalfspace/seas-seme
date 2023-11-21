@@ -30,7 +30,7 @@ function set_default_parameters()
 	"""
 
 	yr2sec = 365*24*60*60
-	Total_Time = 50*yr2sec
+	Total_Time = 1*yr2sec
 	dt_max = 100 * 24 * 60 * 60 # days
 
 	Vpl = 35e-3/yr2sec	# Plate Loading Rate

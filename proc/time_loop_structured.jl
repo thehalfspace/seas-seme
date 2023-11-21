@@ -37,7 +37,7 @@ function main_loop()
 	basis = LobattoLegendreBasis(polydeg)
 
 	####### MESH ##########
-	mesh_file = joinpath(mesh_path, "structured.me")
+	mesh_file = joinpath(mesh_path, "structured.mesh")
 	mesh = UnstructuredMesh2D(mesh_file)
 
 	# Global to local index numbering
@@ -105,13 +105,13 @@ function main_loop()
 	# Impedance = ρ*vs (on absorbing and free boundaries), = 1 on fault and creep boundary 
 	# Left and Bottom boundaries are absorbing 
 	# Right boundary is fault and creep
-	fault_id, fault_x, fault_y, fault_matrix, fault_el_id = 
+	fault_id, fault_x, fault_y, fault_matrix = 
 		get_boundary_nodes_structured(mesh, node_coordinates, jac_matrix, basis.weights, 1, dof_id, :fault)
 	
-	creep_id, creep_x, creep_y, creep_matrix, = 
+	creep_id, creep_x, creep_y, creep_matrix = 
 		get_boundary_nodes_structured(mesh, node_coordinates, jac_matrix, basis.weights, 1, dof_id, :creep)
 	
-	absorbing_id, absorbing_x, absorbing_y, absorb_matrix, = 
+	absorbing_id, absorbing_x, absorbing_y, absorb_matrix = 
 		get_boundary_nodes_structured(mesh, node_coordinates, jac_matrix, basis.weights, ρ*vs, dof_id, :absorbing)
 
 	# Sparse global stiffness assembly 
@@ -134,15 +134,6 @@ function main_loop()
 	# used to split stiffness into on-fault and off-fault parts.
 	fltni = unique(dof_id[:])
 	deleteat!(fltni, interface_id)
-
-	fault_elements = []
-	# Get the elements not on the fault
-	for (e,o) in enumerate(fault_el_id)
-		push!(fault_elements, o[2])
-	end
-
-	# Temporary for now: get the local nodes not on fault boundary 
-	nfault =  collect(1:nnodes*(nnodes-1))
 	
 	# Some constants for timestep evolution calculation 
 	hcell = mean(diff(fault_y))
@@ -175,11 +166,6 @@ function main_loop()
 	u_pre = zeros(ndof)
 	v_pre = zeros(ndof)
 
-	# Linear solve variables
-	u_solve = zeros(nnodes*nnodes)
-	u_el = zeros(nnodes*nnodes)
-	u_temp = zeros(ndof)
-
 	# f = Kf.uf + Km.um (Introduce a new term from Kaneko 2011: Eq 4)
 	f = zeros(ndof)	
 
@@ -188,8 +174,8 @@ function main_loop()
 	τn = zeros(size(fault_id))
 	
 	# State Variable 
-	#θo = zeros(size(fault_id))
-	#θn = zeros(size(fault_id))
+	θo = zeros(size(fault_id))
+	θn = zeros(size(fault_id))
 	
 	# Transformed state variable: ψ = log(θ.Vo/Lc) 
 	# (as used by Kaneko's matlab code)
@@ -287,32 +273,26 @@ function main_loop()
 				# Try the distributed linear solve algorithm here.
 				# Check julia linearsolve package.
 				#=
-				u_temp .= glob.u
-				j = 1
-
 				for el in 1:mesh.n_elements
 					local_index = dof_id[:,:,el]
 
-					if any(fault_elements .== el)
-						u_el[nfault] .= K_el[nfault,nfault,el]*f[local_index][nfault] 
-						u_solve[nfault] .= -(K_el[nfault, nfault, el] \ u_el[nfault])
-					else
-						u_el .= K_el[:,:,el]*f[local_index][:] 
-						u_solve .= -(K_el[:,:,el] \ u_el)
-					end
 					# Ask on julia discourse how to solve this 
 					# Create an MWE 
-					#u_solve .=  qr(K_el[:,:,el], Val(true)) \ u_el
-
-					u_temp[local_index] .+= reshape(u_solve, nnodes, nnodes)
-				end =#
+					u_el = K_el[:,:,el]*f[local_index][:] 
+					#if  iszero(u_el)
+					#	u_solve .= u_el 
+					#else
+					u_solve .=  qr(K_el[:,:,el], Val(true)) \ u_el
+					#end
+					glob.u[local_index] .= glob.u[local_index] .- reshape(u_solve, nnodes, nnodes)
+				end
+				=#
 
 				# Step 2: Quasi-static linear solver
 				# Direct sparse solver 
 				rhs = (Ksparse*f)[fltni] 
+		
 				glob.u[fltni] .= -(Ksparse[fltni, fltni]\rhs)
-
-				#return glob.u, u_temp, K_el[:,:,1], glob.u[dof_id[:,:,1]]
 
 				# Make u = f on fault 
 				glob.u[fault_id] .= u_pre[fault_id] .+ glob.v[fault_id]*dt

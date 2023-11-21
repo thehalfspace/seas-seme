@@ -1,14 +1,11 @@
-using Trixi, LinearAlgebra, DelimitedFiles, 
-	SparseArrays, Printf, StatsBase, UnPack,
-	GLMakie
-
+using Trixi, LinearAlgebra, DelimitedFiles, SparseArrays, Printf, StatsBase
 
 
 #----------------------------#
 # Set simulation name here 
 #----------------------------#
 simulation_name = "test_01/"
-folder_name = "seas-seme-devel/"
+folder_name = "seas-seme/"
 #----------------------------#
 
 # Create paths to save stuff  
@@ -18,7 +15,7 @@ out_path = joinpath(dirname(pwd()), folder_name, "data/", simulation_name)
 mesh_path = joinpath(out_path, "mesh/")
 
 
-#
+# =
 # Comment this block if mesh is already generated
 ##############################################################
 ##############################################################
@@ -28,7 +25,7 @@ if isdir(out_path)
 end 
 
 mkpath(out_path)
-mkpath(mesh_path) #
+mkpath(mesh_path)
 
 #-------------------------------------------------#
 # 					Create Mesh					  #
@@ -51,9 +48,6 @@ include(joinpath(pre_path, "local_mass_stiffness.jl"))
 include(joinpath(pre_path, "boundary_information.jl"))
 include(joinpath(pre_path, "output_locations.jl"))
 include(joinpath(pre_path, "mappings_geometry_straight_2d.jl"))
-include(joinpath(pre_path, "mappings_geometry_curved_2d.jl"))
-include(joinpath(pre_path, "surface_interpolant.jl"))
-include(joinpath(pre_path, "face_interpolant.jl"))
 include(joinpath(proc_path, "element_calculations.jl"))
 include(joinpath(proc_path, "compute_timestep.jl"))
 include(joinpath(proc_path, "fault_solvers.jl"))
@@ -63,8 +57,8 @@ include(joinpath(proc_path, "time_loop_structured.jl"))
 #-------------------------------------------------#
 # 					Time Loop					  #
 #-------------------------------------------------#
-#@elapsed @time main_loop();
-
-gu = main_loop()
+include(joinpath(proc_path, "time_loop_structured.jl"))
+#-------------------------------------------------#
+@elapsed @time main_loop();
 
 @info("\n!!!!!!!Yay Simulation Complete!!!!!!!")

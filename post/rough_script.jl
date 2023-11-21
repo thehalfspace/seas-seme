@@ -1,38 +1,65 @@
-using CairoMakie, DelimitedFiles
+#################################
+# SOME ROUGH SCRIPTS
+# FOR TRYING OUT STUFF
+#################################
 
-simulation_name = "test_01/"
-folder_name = "seas-seme-devel/"
-out_path = joinpath(dirname(pwd()), folder_name, "data/", simulation_name)
-mesh_path = joinpath(out_path, "mesh/")
-fig_path = joinpath(dirname(pwd()), folder_name, "plots/", simulation_name)
+using StatsBase
+using PyPlot
 
-mkpath(fig_path)
-const dpi = 300
-my_theme = Theme(
-    fontsize=48,
-    labelsize=36,
-    linewidth=6
-)
-set_theme!(my_theme)
+# Get index for each event
+function event_indx(tStart, tEnd, time_)
+    start_indx = zeros(size(tStart))
+    end_indx = zeros(size(tEnd))
 
-time_series_1d = readdlm(joinpath(out_path, "time_series_1d.out"), skipstart=1);
+    for i = 1:length(tStart)
+        
+        start_indx[i] = findall(time_ .== tStart[i])[1]
+        end_indx[i] = findall(time_ .== tEnd[i])[1]
+    end
 
-yr2sec = 365*24*60*60
-t = time_series_1d[:,1]/yr2sec
-vmax = time_series_1d[:,2]
-
-function sliprate_plot(vmax, t)
-    #%%
-    figsize = (8.2, 3.35) # in inches
-	f = Figure(resolution=figsize.*dpi)
-	ax = Axis(f[1,1],
-			title="Max. sliprate on fault",
-			xlabel="Time (years)",
-			ylabel="Sliprate (m/s)",
-			yscale=log10)
-	
-	lines!(ax, t, vmax)
-	save(joinpath(fig_path, "max_sliprate.png"), f)
-	f
-    #%%
+    return start_indx, end_indx
 end
+
+# Plot sliprates for each event with depth
+function test1(S, O, evno)
+    start_indx = zeros(size(O.tStart))
+    end_indx = zeros(size(O.tEnd))
+
+    for i = 1:length(O.tStart)
+        
+        start_indx[i] = findall(O.time_ .== O.tStart[i])[1]
+        end_indx[i] = findall(O.time_ .== O.tEnd[i])[1]
+    end
+    
+    start_indx = Int.(start_indx)[evno]
+    end_indx = Int.(end_indx)[evno]
+    sv = zeros(size(O.seismic_slipvel))
+    
+    inc = 0.1       # time interval = 0.1 sec for plotting
+    to = O.time_[start_indx]    # start time
+    j = 1
+    for i=start_indx:end_indx
+        if O.time_[i] >= to
+            sv[:,j] = O.seismic_slipvel[:,i]
+            to = to + inc
+            j = j+1
+        end
+    end
+    
+    sv = sv[:,1:j]
+
+    fig = PyPlot.figure(figsize=(8,6))
+    ax = fig.add_subplot(111)
+    
+    ax.plot(sv, S.FltX/1e3, ".--", label="a", lw = 1)
+    ax.set_xlabel("Slip rate (m/s)")
+    ax.set_ylabel("Depth (km)")
+    ax.set_title("Slip rate for one event")
+    #  ax.set_xlim([0, 0.02])
+    ax.set_ylim([-24, 0])
+    show()
+    
+    figname = string(path, "slipvel.pdf")
+    fig.savefig(figname, dpi = 300)
+end
+

@@ -1,35 +1,9 @@
+include("time_loop_structured.jl")
 using PyPlot
-#using StatsBase
-#using LaTeXStrings
-#using PyCall
-#mpl = pyimport("matplotlib")
 
-# Default plot params
-function plot_params()
-  plt.rc("xtick", labelsize=16)
-  plt.rc("ytick", labelsize=16)
-  plt.rc("xtick", direction="in")
-  plt.rc("ytick", direction="in")
-  plt.rc("font", size=15)
-  plt.rc("figure", autolayout="True")
-  plt.rc("axes", titlesize=16)
-  plt.rc("axes", labelsize=17)
-  plt.rc("xtick.major", width=1.5)
-  plt.rc("xtick.major", size=5)
-  plt.rc("ytick.major", width=1.5)
-  plt.rc("ytick.major", size=5)
-  plt.rc("lines", linewidth=2)
-  plt.rc("axes", linewidth=1.5)
-  plt.rc("legend", fontsize=13)
-  plt.rc("mathtext", fontset="stix")
-  plt.rc("font", family="STIXGeneral")
+yr2sec = 365*24*60*60
 
-  # Default width for Nature is 7.2 inches, 
-  # height can be anything
-  #plt.rc("figure", figsize=(7.2, 4.5))
-end
-
-
+t, vn = main_loop();
 
 #mesh_file = joinpath(mesh_path, "structured.mes")
 #m = UnstructuredMesh2D(mesh_file)

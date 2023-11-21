@@ -56,7 +56,6 @@ function get_boundary_nodes_structured(mesh, node_coords, jac_matrix, weights, i
 	"""
 	polydeg = mesh.polydeg 
 	nnodes = polydeg + 1
-	#fault_el = []
 	if boundary_name == :absorbing
 		# Left and Bottom boundaries are absorbing 
 		boundary_el_id = unique(vcat(findall(mesh.boundary_names .== :Left), 
@@ -68,7 +67,7 @@ function get_boundary_nodes_structured(mesh, node_coords, jac_matrix, weights, i
 	elseif boundary_name == :fault
 		id_temp = findall(mesh.boundary_names .== :Right)
 		boundary_el_id = id_temp[Int(length(id_temp)/2)+1:end]
-		#fault_el = copy(boundary_el_id)
+		#println(boundary_el_id)
 	
 	elseif boundary_name == :creep
 		id_temp = findall(mesh.boundary_names .== :Right)
@@ -132,7 +131,7 @@ function get_boundary_nodes_structured(mesh, node_coords, jac_matrix, weights, i
 	end
 
 
-	return boundary_node_id_unique, boundary_x_unique, boundary_y_unique, boundary_mat_unique, boundary_el_id
+	return boundary_node_id_unique, boundary_x_unique, boundary_y_unique, boundary_mat_unique
 	#return unique(boundary_node_id_unique), unique(boundary_x_unique), unique(boundary_y_unique), unique(boundary_mat_unique)
 end
 
@@ -146,12 +145,15 @@ function get_boundary_nodes_unstructured(mesh, node_coords, jac_matrix, weights,
 	nnodes = polydeg + 1
 	boundary_el_id = findall(mesh.boundary_names .== boundary_name)
 
+	wgll = weights * weights'
+
 	boundary_node_id = Int[]
 	boundary_x = Float64[]
 	boundary_y = Float64[]
 	boundary_mat = Float64[]
 
-	boundary_mat_local = zeros(nnodes)
+	boundary_mat_local = zeros(nnodes, nnodes)
+	J_local = zeros(nnodes, nnodes)
 
 	for id in boundary_el_id
 		surface = id[1]
@@ -160,29 +162,26 @@ function get_boundary_nodes_unstructured(mesh, node_coords, jac_matrix, weights,
 		ncx = node_coords[1,:,:,el]
 		ncy = node_coords[2,:,:,el] 
 
-		jac = jac_matrix[:,:,:,:,el]
+		nd1 = norm_dirs[1,:,surface, el]
+		nd2 = norm_dirs[2,:,surface, el]
+		J_local .= nd1 * nd2'
 		
-		# Ampuero SEM Notes page 23 to calculate jac1D at boundaries
-		# **TODO: Check if this works correctly for nonuniform mesh 
-		if surface == 1		# Bottom: (dx/dξ)^2 + (dy/dξ)^2  	# bottom index [1,:]
-			jac1D = sqrt.(jac[1,1,1,:].^2 .+ jac[2,1,1,:].^2)
-		
-		elseif surface == 2	# Right: (dx/dη)^2 + (dy/dη)^2		# right index [:,end]
-			jac1D = sqrt.(jac[1,2,:,end].^2 .+ jac[2,2,:,end].^2)
-		
-		elseif surface == 3	# Top: (dx/dξ)^2 + (dy/dξ)^2		# top index [end,:]
-			jac1D = sqrt.(jac[1,1,end,:].^2 .+ jac[2,1,end,:].^2)
-		
-		elseif surface == 4	# Left: (dx/dη)^2 + (dy/dη)^2		# left index [:,1]
-			jac1D = sqrt.(jac[1,2,:,1].^2 .+ jac[2,2,:,1].^2)
+	
+		# Make separate if statements for each of the four boundaries 
+		if iszero(nd1)
+			boundary_mat_local .= weights .* abs.(nd2) .* impedance
+		else
+			boundary_mat_local .= weights .* abs.(nd1) .* impedance
 		end
 
-		boundary_mat_local .= weights .*jac1D .*impedance 
+		# Boundary Matrix: B[i,j] = w[i]w[j]*jac_det[i,j]*impedance
+		#boundary_mat_local .= wgll.*impedance .* abs.(J_local)
+		#boundary_mat_local .= wgll.*jac_det[:,:,el].*impedance 
 
 		append!(boundary_node_id, get_element_surface(dof_id[:,:,el], surface))
 		append!(boundary_x, get_element_surface(ncx, surface))
 		append!(boundary_y, get_element_surface(ncy, surface))
-		append!(boundary_mat, boundary_mat_local) #get_element_surface(boundary_mat_local, surface))
+		append!(boundary_mat, get_element_surface(boundary_mat_local, surface))
 	end
 
 	# Add edge contributions
@@ -202,7 +201,9 @@ function get_boundary_nodes_unstructured(mesh, node_coords, jac_matrix, weights,
 		#push!(boundary_node_id_unique, boundary_node_id[id[1]])
 	end
 
-	return boundary_node_id_unique, boundary_x_unique, boundary_y_unique, boundary_mat_unique, boundary_el_id
+
+	return boundary_node_id_unique, boundary_x_unique, boundary_y_unique, boundary_mat_unique
+	#return unique(boundary_node_id_unique), unique(boundary_x_unique), unique(boundary_y_unique), unique(boundary_mat_unique)
 end
 
 # Get the global node numberings depending on the surface
