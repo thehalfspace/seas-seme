@@ -31,7 +31,8 @@ mkpath(mesh_path)
 # 					Create Mesh					  #
 #-------------------------------------------------#
 # Structured mesh is cartesian grid: ignore 
-include(joinpath(pre_path, "mesh_structured.jl"))
+# include(joinpath(pre_path, "mesh_structured.jl"))
+include(joinpath(pre_path, "mesh_split_node.jl"))
 #-------------------------------------------------#
 
 # Note: structured cartesian mesh will give warning: MoDEL block missing
