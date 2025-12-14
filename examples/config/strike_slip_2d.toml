@@ -1,0 +1,72 @@
+# SEAS-SEME Configuration: 2D Strike-Slip Earthquake Cycle Simulation
+#
+# This configuration reproduces the benchmark case with a 40km x 40km domain,
+# vertical fault from 20-40km depth, and rate-state friction.
+
+[simulation]
+name = "strike_slip_benchmark"
+total_time = 6.31152e8                  # 20 years in seconds (20 * 365 * 24 * 60 * 60)
+output_dir = "./data"
+
+[mesh]
+file = "./data/structured.mesh"         # HOHQMesh mesh file
+polynomial_degree = 4                   # Spectral element polynomial degree (p=4)
+
+[physics]
+# Material properties
+density = 2670.0                        # Density (kg/m³)
+shear_velocity = 3464.0                 # Shear wave velocity (m/s)
+
+# Plate loading and friction
+plate_velocity = 1.11e-9                # 35 mm/yr in m/s (35e-3 / (365*24*60*60))
+reference_friction = 0.6                # Reference friction coefficient fo
+reference_slip_rate = 1.0e-6            # Reference slip rate Vo (m/s)
+
+[physics.initial_conditions]
+type = "depth_dependent"                # Generate depth-dependent friction profile
+velocity_strengthening_shallow = true   # VS friction in shallow zone (0-2km)
+file = nothing                          # No custom IC file (use auto-generated)
+
+# Depth zones (see pre/set_initial_conditions.jl for details):
+# Zone 1: 0-2 km    (velocity strengthening, a > b)
+# Zone 2: 2-12 km   (velocity weakening, a < b, seismogenic zone)
+# Zone 3: 12-17 km  (transition zone)
+# Zone 4: 17-20 km  (velocity strengthening, deep creep)
+
+[solvers]
+cfl_number = 0.6                        # CFL stability criterion
+dt_max = 8.64e6                         # 100 days in seconds (100 * 24 * 60 * 60)
+dt_min_factor = 0.2                     # dt_min = 0.2 * dx/vs (factor * cell_size / shear_velocity)
+
+[solvers.quasistatic]
+tolerance = 1.0e-6                      # Convergence tolerance for CG solver
+max_iterations = 100                    # Maximum CG iterations
+amg_max_levels = 10                     # Maximum AMG multigrid levels for preconditioner
+
+[solvers.dynamic]
+velocity_threshold_qs_to_dyn = 5.0e-3   # Switch QS → dynamic when Vmax >= 5 mm/s
+velocity_threshold_dyn_to_qs = 2.0e-3   # Switch dynamic → QS when Vmax < 2 mm/s
+
+[output]
+format = "hdf5"                         # Output format (only HDF5 supported)
+log_interval = 500                      # Print status every N iterations
+
+# Time series output depths (km along fault)
+# Corresponds to old output_locations.jl
+timeseries_depths = [0.0, 2.5, 5.0, 7.5, 10.0, 12.5, 15.0, 17.5, 20.0]
+
+# Full-field snapshot interval
+snapshot_interval = 3.1557e7            # 1 year in seconds (365.25 * 24 * 60 * 60)
+
+[output.fields]
+displacement = true                     # Output displacement field
+velocity = true                         # Output velocity field
+fault_slip = true                       # Output fault slip
+fault_stress = true                     # Output fault shear stress
+state_variable = true                   # Output rate-state variable ψ
+
+[checkpointing]
+enabled = true                          # Enable checkpointing for restarts
+interval = 3.1557e7                     # Checkpoint every 1 year of simulation time
+keep_last = 5                           # Keep only the last 5 checkpoints
+directory = "./checkpoints"             # Checkpoint directory
