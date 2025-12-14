@@ -1,3 +1,28 @@
+# Apply matrix-free stiffness
+function apply_stiffness!(y, x, K_el, dof_id, n_elements)
+    """
+    Compute y = K*x without assembly
+    Uses element-by-element operations
+    """
+    
+    fill!(y, 0.0)   # Zero output
+    
+    for el in 1:n_elements
+        # Get local DOFs for this element
+        local_idx = dof_id[:, :, el]
+
+        # Extract the local vector
+        x_local = x[local_idx]
+
+        # Local matrix-vector product
+        y_local = K_el[:, :, el] * x_local[:]
+
+        # Accumulate into global (assembly)
+        y[local_idx] .+= reshape(y_local, size(local_idx))
+    end
+
+    return y
+end
 
 # Rough work 
 function stiffness_assembly(K_el, dof_id)
@@ -23,6 +48,38 @@ function stiffness_assembly(K_el, dof_id)
 
 	return sparse(I,J,V,ndof,ndof,+)
 end
+
+# Matrix-free operator with AMG preconditioner
+using LinearAlgebra, IterativeSolvers, AlgebraicMultigrid
+
+# Define matrix-free operator (uses high-order p=4 elements)
+struct StiffnessOperator{T}
+    K_el::Array{T,3}
+    dof_id::Array{Int,3}
+    n_elements::Int
+    ndof::Int
+    fltni::Vector{Int} # DOFs not on fault/creep
+end
+
+# Implement matrix-vector product (matrix-free, high-order)
+function LinearAlgebra.mul!(y, A::StiffnessOperator, x)
+    # Expand x to full DOF vector (zero on fault)
+    x_full = zeros(A.ndof)
+    x_full[A.fltni] .= x
+
+    # Apply stiffness element-by-element (matrix-free!)
+    y_full = apply_stiffness!(zeros(A.ndof), x_full, A.K_el, A.dof_id, A.n_elements)
+
+    # Extract non-fault DOFs
+    y .= y_full[A.fltni]
+    return y
+end
+
+# Implement required LinearAlgebra interface
+Base.size(A::StiffnessOperator) = (length(A.fltni), length(A.fltni))
+Base.size(A::StiffnessOperator, d::Int) = size(A)[d]
+Base.eltype(A::StiffnessOperator{T}) where {T} = T
+
 
 # Create global variable structures
 mutable struct global_vars{T<:Vector{Float64}}
@@ -111,12 +168,8 @@ function main_loop()
 	creep_id, creep_x, creep_y, creep_matrix = 
 		get_boundary_nodes_structured(mesh, node_coordinates, jac_matrix, basis.weights, 1, dof_id, :creep)
 	
-	absorbing_id, absorbing_x, absorbing_y, absorb_matrix = 
+	absorbing_id, absorbing_x, absorbing_y, absorb_matrix =
 		get_boundary_nodes_structured(mesh, node_coordinates, jac_matrix, basis.weights, ρ*vs, dof_id, :absorbing)
-
-	# Sparse global stiffness assembly 
-	Ksparse = spzeros(ndof, ndof)
-	Ksparse = stiffness_assembly(K_el, dof_id)
 
 	# Creep and fault id share one node here: 
 	# add the contributions to fault matrix and remove the node from creep id.
@@ -134,7 +187,28 @@ function main_loop()
 	# used to split stiffness into on-fault and off-fault parts.
 	fltni = unique(dof_id[:])
 	deleteat!(fltni, interface_id)
-	
+
+	##============================================================================
+	# BUILD AMG PRECONDITIONER (one-time cost)
+	##============================================================================
+	println("Building sparse matrix for AMG preconditioner...")
+	@time begin
+		# Assemble sparse stiffness matrix (for preconditioner only!)
+		Ksparse = stiffness_assembly(K_el, dof_id)
+
+		# Extract submatrix for non-fault DOFs
+		K_prec = Ksparse[fltni, fltni]
+
+		# Build AMG hierarchy using Ruge-Stuben
+		println("Building AMG hierarchy...")
+		ml = ruge_stuben(K_prec)
+		amg_precond = aspreconditioner(ml)  # Wrap for IterativeSolvers.jl
+
+		println("  AMG levels: $(length(ml.levels))")
+		println("  Coarsest level size: $(size(ml.levels[end].A, 1))")
+	end
+	##============================================================================
+
 	# Some constants for timestep evolution calculation 
 	hcell = mean(diff(fault_y))
 	μmax = μ 	# Update this when adding material tags 
@@ -290,9 +364,29 @@ function main_loop()
 
 				# Step 2: Quasi-static linear solver
 				# Direct sparse solver 
-				rhs = (Ksparse*f)[fltni] 
-		
-				glob.u[fltni] .= -(Ksparse[fltni, fltni]\rhs)
+				# rhs = (Ksparse*f)[fltni] 
+				# glob.u[fltni] .= -(Ksparse[fltni, fltni]\rhs)
+
+                # Step 2: Matrix-free CG with AMG preconditioner
+                rhs_full = apply_stiffness!(zeros(ndof), f, K_el, dof_id, mesh.n_elements)
+                rhs = rhs_full[fltni]
+
+                # Create matrix-free operator (high-order p=4)
+                K_op = StiffnessOperator(K_el, dof_id, mesh.n_elements, ndof, fltni)
+
+                # Solve using CG with AMG preconditioner
+                # IterativeSolvers.jl's cg: simpler API, works directly with AMG
+                u_sol = cg(K_op, -rhs, Pl=amg_precond, reltol=1e-6, maxiter=100, log=true)
+
+                # u_sol is a tuple (solution, history) when log=true
+                glob.u[fltni] .= u_sol[1]
+
+                # Print convergence info (first few iterations only)
+                if it <= 10 || mod(it, 500) == 0
+                    niter = length(u_sol[2][:resnorm]) - 1
+                    converged = u_sol[2].isconverged
+                    println("  CG iterations: $niter, converged: $converged")
+                end
 
 				# Make u = f on fault 
 				glob.u[fault_id] .= u_pre[fault_id] .+ glob.v[fault_id]*dt
@@ -309,10 +403,10 @@ function main_loop()
 					glob.a[local_index] .= glob.a[local_index] .+ reshape(a_el, nnodes, nnodes) 
 				end =#
 
-				# Step 3: Compute on-fault traction 
+				# Step 3: Compute on-fault traction
 				# (f* is glob.a in my case: to save space and reuse variables): a is typically zero in quasi-static algorithm
 				glob.a .= 0.
-				glob.a .= Ksparse*glob.u
+				glob.a .= apply_stiffness!(glob.a, glob.u, K_el, dof_id, mesh.n_elements)
 				
 				# Enforce a = 0 on creep boundary
 				glob.a[creep_id] .= 0	
@@ -370,13 +464,9 @@ function main_loop()
 			glob.a .= 0
 
 			# Step 2: Internal forces -K*d[t+1] stored in global array 'a'
-			#=
-			for el in 1:mesh.n_elements
-				local_index = dof_id[:,:,el]	
-				a_el = K_el[:,:,el]*glob.u[local_index][:]
-				glob.a[local_index] .= glob.a[local_index] .- reshape(a_el, nnodes, nnodes) 
-			end =#
-			glob.a .= -Ksparse*glob.u 
+			# Matrix-free version
+			glob.a .= apply_stiffness!(glob.a, glob.u, K_el, dof_id, mesh.n_elements)
+			glob.a .= -glob.a 
 
 			# Enforce a = 0 on creep boundary
 			glob.a[creep_id] .= 0
