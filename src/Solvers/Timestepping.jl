@@ -123,7 +123,8 @@ function compute_timestep(fault_V::Vector{T},
         end
 
         # Gradual timestep increase (no more than dt_incf * current)
-        if dt_new > dt_incf * dt_current
+        # Skip this check if dt_current is zero (first iteration)
+        if dt_current > zero(T) && dt_new > dt_incf * dt_current
             dt_new = dt_incf * dt_current
         end
 
@@ -161,9 +162,9 @@ Hysteresis prevents rapid mode switching.
 """
 function determine_solver_mode(Vf_max::T, current_mode::Symbol,
                               timestepper::AdaptiveTimestepper{T}) where T<:AbstractFloat
-    if current_mode == :quasistatic && Vf_max < timestepper.Vthreshold_qs_to_dyn
-        return :quasistatic
-    elseif current_mode == :dynamic && Vf_max < timestepper.Vthreshold_dyn_to_qs
+    # Mode switching with hysteresis
+    if current_mode == :quasistatic && Vf_max < timestepper.Vthreshold_qs_to_dyn ||
+       current_mode == :dynamic && Vf_max < timestepper.Vthreshold_dyn_to_qs
         return :quasistatic
     else
         return :dynamic

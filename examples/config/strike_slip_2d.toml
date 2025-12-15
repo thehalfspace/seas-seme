@@ -9,7 +9,7 @@ day2sec = 86400.0                   # Seconds per day (24 * 3600)
 
 [simulation]
 name = "strike_slip_benchmark"
-total_time_years = 20.0             # Total simulation time in years
+total_time_years = 110.0             # Total simulation time in years
 output_dir = "./data"               # Base output directory (simulation folder created inside)
 
 [mesh]
@@ -70,5 +70,5 @@ state_variable = true               # Output rate-state variable ψ
 
 [checkpointing]
 enabled = true                      # Enable checkpointing for restarts
-interval_years = 1.0                # Checkpoint every N years
+interval_years = 10.0                # Checkpoint every N years
 keep_last = 5                       # Keep only the last N checkpoints

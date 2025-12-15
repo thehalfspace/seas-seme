@@ -76,12 +76,13 @@ function build_quasistatic_solver(K_el::Array{T,3}, dof_id::Array{Int,3},
     K_sparse = stiffness_assembly(K_el, dof_id)
     K_reduced = K_sparse[fltni, fltni]
 
-    # Build AMG preconditioner (smoothed aggregation)
-    amg_precond = ruge_stuben(K_reduced, max_levels=amg_max_levels)
+    # Build AMG preconditioner (Ruge-Stuben)
+    ml = ruge_stuben(K_reduced, max_levels=amg_max_levels)
+    amg_precond = aspreconditioner(ml)  # Wrap for IterativeSolvers.jl
 
     if verbose
-        println("  AMG levels: ", length(amg_precond.levels))
-        println("  Coarsest level size: ", size(amg_precond.levels[end].A, 1))
+        println("  AMG levels: ", length(ml.levels))
+        println("  Coarsest level size: ", size(ml.levels[end].A, 1))
     end
 
     # Build matrix-free operator

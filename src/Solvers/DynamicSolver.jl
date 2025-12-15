@@ -88,7 +88,11 @@ function dynamic_step!(state, solver::DynamicSolver{T}, mesh, physics, ics,
     creep_id = mesh.boundaries.creep.node_ids
     absorbing_id = mesh.boundaries.absorbing.node_ids
     fault_matrix = mesh.boundaries.fault.matrix
-    fault_z = fault_matrix  # Impedance
+
+    # Compute fault impedance: Z = M / (fault_matrix * dt)
+    # See Kaneko et al. (2008) for derivation
+    fault_z = M_global[fault_id] ./ (fault_matrix .* dt)
+
     absorb_matrix = mesh.boundaries.absorbing.matrix
 
     # Store previous state
