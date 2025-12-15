@@ -12,12 +12,12 @@ Container for boundary node information.
 
 # Fields
 - `node_ids::Vector{Int}`: Global DOF indices of boundary nodes
-- `coords::Matrix{T}`: Coordinates [2 x nnodes] (x and y)
+- `coords::AbstractMatrix{T}`: Coordinates [2 x nnodes] (x and y)
 - `matrix::Vector{T}`: Impedance matrix contributions for each node
 """
 struct BoundaryData{T<:AbstractFloat}
     node_ids::Vector{Int}
-    coords::Matrix{T}         # [2 x nnodes]
+    coords::AbstractMatrix{T}         # [2 x nnodes]
     matrix::Vector{T}
 end
 
@@ -29,9 +29,9 @@ Extract boundary nodes for structured meshes with axis-aligned boundaries.
 
 # Arguments
 - `mesh::UnstructuredMesh2D`: Trixi.jl mesh
-- `node_coords::Array{<:Any,4}`: Node coordinates [2, nnodes, nnodes, nelements]
-- `jac_matrix::Array{<:Any,5}`: Jacobian matrices [2, 2, nnodes, nnodes, nelements]
-- `weights::Vector`: Gauss-Lobatto quadrature weights
+- `node_coords::AbstractArray`: Node coordinates [2, nnodes, nnodes, nelements]
+- `jac_matrix::AbstractArray`: Jacobian matrices [2, 2, nnodes, nnodes, nelements]
+- `weights::AbstractVector`: Gauss-Lobatto quadrature weights
 - `impedance::Real`: Impedance value (ρ*vs for absorbing, 1.0 for fault/creep)
 - `dof_id::Array{Int,3}`: Connectivity matrix [nnodes, nnodes, nelements]
 - `boundary_name::Symbol`: Boundary to extract (:fault, :creep, :absorbing, :free_surface)
@@ -52,7 +52,7 @@ function get_boundary_nodes_structured(
     mesh::UnstructuredMesh2D,
     node_coords::AbstractArray,
     jac_matrix::AbstractArray,
-    weights::Vector,
+    weights::AbstractVector,
     impedance::Real,
     dof_id::Array{Int,3},
     boundary_name::Symbol

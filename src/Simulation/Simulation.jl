@@ -104,12 +104,8 @@ function build_simulation(config::SimulationConfig; T::Type=Float64)
     println("\n[3/8] Computing elemental matrices...")
     basis = LobattoLegendreBasis(mesh.polynomial_degree)
 
-    M_el = build_mass_matrices(mesh, physics, basis)
+    M_el, M_global = build_mass_matrices(mesh, physics, basis)
     K_el = build_stiffness_matrices(mesh, physics, basis)
-
-    # Build global mass matrix (diagonal)
-    M_global = zeros(T, mesh.ndof)
-    global_mass_matrix!(M_global, mesh, M_el, mesh.dof_id)
     @printf("  Mass and stiffness matrices computed\n")
 
     # 4. Adjust mass matrix for absorbing boundaries
@@ -133,7 +129,7 @@ function build_simulation(config::SimulationConfig; T::Type=Float64)
         yr2sec = T(365.25 * 24 * 3600)
     )
 
-    ics = build_initial_conditions(config.physics, mesh, T=T)
+    ics = build_initial_conditions(config.physics, mesh)
     @printf("  Initial conditions generated\n")
     @printf("  Fault depth range: %.1f - %.1f km\n",
            minimum(mesh.boundaries.fault.coords[2,:]) / 1000,

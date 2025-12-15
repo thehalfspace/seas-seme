@@ -211,6 +211,13 @@ function initialize_output!(io::HDF5OutputManager, mesh, config, ics)
     # Per-location time series
     for (i, depth) in enumerate(io.depths)
         depth_str = @sprintf("depth_%.1fkm", depth)
+
+        # Check if group already exists; if so, skip (can happen with duplicate depths)
+        if haskey(ts_group, depth_str)
+            @warn "Skipping duplicate depth group" depth_str depth
+            continue
+        end
+
         depth_group = create_group(ts_group, depth_str)
 
         # Store location metadata
@@ -249,12 +256,11 @@ Create extensible 1D dataset with compression.
 """
 function create_extensible_dataset(parent, name::String, dtype::Type;
                                   chunk_size::Int=1000)
+    # Create extensible dataset with GZIP compression
     dset = create_dataset(parent, name, dtype,
                          ((0,), (-1,)),  # Initial size 0, unlimited max
-                         chunk=(chunk_size,))
-
-    # Apply GZIP compression (level 4 = good compression/speed balance)
-    HDF5.set_deflate(dset, 4)
+                         chunk=(chunk_size,),
+                         deflate=4)  # GZIP compression level 4
 
     return dset
 end

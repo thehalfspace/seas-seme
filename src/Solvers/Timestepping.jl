@@ -68,7 +68,7 @@ r₀ = (μ * Lc) / (a * σ_n) * (1 - (b-a)/a)
 where the threshold `ξth` ensures stable resolution of the nucleation process.
 """
 function compute_timestep(fault_V::Vector{T},
-                         fault_coords::Matrix{T},
+                         fault_coords::AbstractMatrix{T},
                          friction,  # RateStateFriction type
                          timestepper::AdaptiveTimestepper{T},
                          solver_mode::Symbol,

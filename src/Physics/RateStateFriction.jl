@@ -45,6 +45,7 @@ struct RateStateFriction{T<:AbstractFloat}
     a::Vector{T}
     b::Vector{T}
     Lc::Vector{T}
+    σ_n::Vector{T}
     Vo::T
     fo::T
 end
@@ -97,7 +98,7 @@ Initial conditions for fault simulation.
 - Combined with friction parameters, determines nucleation behavior
 """
 struct InitialConditions{T<:AbstractFloat}
-    σn::Vector{T}
-    τs::Vector{T}
+    σo::Vector{T}
+    τo::Vector{T}
     friction::RateStateFriction{T}
 end

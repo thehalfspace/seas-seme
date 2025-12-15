@@ -18,7 +18,7 @@ Uses bilinear mapping for straight-sided quadrilateral elements (Alg. 95, Kopriv
 # Arguments
 - `xi::Real`: Reference coordinate ξ ∈ [-1, 1]
 - `eta::Real`: Reference coordinate η ∈ [-1, 1]
-- `corner_points::Matrix`: Corner points [4 x 2] in physical space
+- `corner_points::AbstractMatrix`: Corner points [4 x 2] in physical space
   - Row order: [bottom-left, bottom-right, top-right, top-left]
 
 # Returns
@@ -33,7 +33,7 @@ Corner numbering convention (counterclockwise from bottom-left):
 1 -------- 2
 ```
 """
-function straight_side_quad_map(xi::Real, eta::Real, corner_points::Matrix)
+function straight_side_quad_map(xi::Real, eta::Real, corner_points::AbstractMatrix)
     x = 0.25 * (
         corner_points[1, 1] * (1.0 - xi) * (1.0 - eta) +
         corner_points[2, 1] * (1.0 + xi) * (1.0 - eta) +
@@ -62,7 +62,7 @@ Returns the derivatives of physical coordinates with respect to reference coordi
 # Arguments
 - `xi::Real`: Reference coordinate ξ
 - `eta::Real`: Reference coordinate η
-- `corner_points::Matrix`: Corner points [4 x 2]
+- `corner_points::AbstractMatrix`: Corner points [4 x 2]
 
 # Returns
 - `X_ξ::Real`: ∂x/∂ξ
@@ -78,7 +78,7 @@ J = [X_ξ  X_η]
 ```
 Jacobian determinant: det(J) = X_ξ * Y_η - X_η * Y_ξ
 """
-function straight_side_quad_map_metrics(xi::Real, eta::Real, corner_points::Matrix)
+function straight_side_quad_map_metrics(xi::Real, eta::Real, corner_points::AbstractMatrix)
     X_xi = 0.25 * (
         (1.0 - eta) * (corner_points[2, 1] - corner_points[1, 1]) +
         (1.0 + eta) * (corner_points[3, 1] - corner_points[4, 1])
@@ -111,8 +111,8 @@ Compute physical (x, y) coordinates for all nodes in an element.
 - `node_coordinates::AbstractArray{<:Any,4}`: Storage array [2, nnodes, nnodes, nelements]
   (modified in-place)
 - `element::Int`: Element index
-- `nodes::Vector`: Reference node locations (e.g., Gauss-Lobatto points)
-- `corners::Matrix`: Element corner points [4 x 2]
+- `nodes::AbstractVector`: Reference node locations (e.g., Gauss-Lobatto points)
+- `corners::AbstractMatrix`: Element corner points [4 x 2]
 
 # Returns
 - `node_coordinates`: Modified array with physical coordinates
@@ -124,8 +124,8 @@ Compute physical (x, y) coordinates for all nodes in an element.
 function calc_node_coordinates!(
     node_coordinates::AbstractArray{<:Any,4},
     element::Int,
-    nodes::Vector,
-    corners::Matrix
+    nodes::AbstractVector,
+    corners::AbstractMatrix
 )
     for j in eachindex(nodes), i in eachindex(nodes)
         node_coordinates[:, i, j, element] .=
@@ -144,8 +144,8 @@ Compute Jacobian matrix components for all nodes in an element.
 - `jacobian_matrix::AbstractArray`: Storage array [2, 2, nnodes, nnodes, nelements]
   (modified in-place)
 - `element::Int`: Element index
-- `nodes::Vector`: Reference node locations
-- `corners::Matrix`: Element corner points [4 x 2]
+- `nodes::AbstractVector`: Reference node locations
+- `corners::AbstractMatrix`: Element corner points [4 x 2]
 
 # Returns
 - `jacobian_matrix`: Modified array with metric terms
@@ -159,8 +159,8 @@ Compute Jacobian matrix components for all nodes in an element.
 function calc_metric_terms!(
     jacobian_matrix::AbstractArray,
     element::Int,
-    nodes::Vector,
-    corners::Matrix
+    nodes::AbstractVector,
+    corners::AbstractMatrix
 )
     for j in eachindex(nodes), i in eachindex(nodes)
         (
@@ -183,8 +183,8 @@ Compute outward-pointing normal vectors on element boundaries.
 - `normal_directions::AbstractArray`: Storage array [2, nnodes, 4, nelements]
   (modified in-place)
 - `element::Int`: Element index
-- `nodes::Vector`: Reference node locations
-- `corners::Matrix`: Element corner points [4 x 2]
+- `nodes::AbstractVector`: Reference node locations
+- `corners::AbstractMatrix`: Element corner points [4 x 2]
 
 # Returns
 - `normal_directions`: Modified array with normal vectors
@@ -202,8 +202,8 @@ Compute outward-pointing normal vectors on element boundaries.
 function calc_normal_directions!(
     normal_directions::AbstractArray,
     element::Int,
-    nodes::Vector,
-    corners::Matrix
+    nodes::AbstractVector,
+    corners::AbstractMatrix
 )
     # Sides 2 (right) and 4 (left)
     for j in eachindex(nodes)

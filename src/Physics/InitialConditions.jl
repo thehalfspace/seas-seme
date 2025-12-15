@@ -128,7 +128,7 @@ function build_initial_conditions(
 
     # Create friction law
     friction = RateStateFriction(
-        a, b, Lc,
+        a, b, Lc, σo,
         config.reference_slip_rate,  # Vo
         config.reference_friction     # fo
     )
@@ -176,8 +176,8 @@ function save_initial_conditions(
     # Create output matrix
     output = hcat(
         depth_km,
-        ics.σn / 1e6,  # MPa
-        ics.τs / 1e6,  # MPa
+        ics.σo / 1e6,  # MPa
+        ics.τo / 1e6,  # MPa
         ics.friction.a,
         ics.friction.b,
         ics.friction.Lc

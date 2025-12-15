@@ -27,7 +27,6 @@ using Trixi
 using HOHQMesh
 using AlgebraicMultigrid
 using IterativeSolvers
-using Krylov
 using LinearSolve
 using StaticArrays
 using StatsBase
