@@ -32,18 +32,41 @@ function load_config(toml_path::String)::SimulationConfig
 
     dict = TOML.parsefile(toml_path)
 
-    # Parse nested configurations
+    # Get time conversion constants
+    yr2sec = get(get(dict, "constants", Dict()), "yr2sec", 365.25 * 24 * 3600)
+    day2sec = get(get(dict, "constants", Dict()), "day2sec", 24 * 3600)
+
+    # Parse simulation section with time conversion
+    sim_dict = dict["simulation"]
+    total_time = if haskey(sim_dict, "total_time_years")
+        sim_dict["total_time_years"] * yr2sec
+    elseif haskey(sim_dict, "total_time")
+        sim_dict["total_time"]
+    else
+        error("Must specify either total_time or total_time_years in [simulation]")
+    end
+
+    # Create simulation directory structure
+    base_dir = sim_dict["output_dir"]
+    sim_name = sim_dict["name"]
+    sim_dir = joinpath(base_dir, sim_name)
+
+    # Parse nested configurations (passing time constants for conversion)
     mesh_config = parse_mesh_config(dict["mesh"])
     physics_config = parse_physics_config(dict["physics"])
-    solvers_config = parse_solvers_config(dict["solvers"])
-    output_config = parse_output_config(dict["output"])
-    checkpoint_config = parse_checkpoint_config(dict["checkpointing"])
+    solvers_config = parse_solvers_config(dict["solvers"], day2sec)
+    output_config = parse_output_config(dict["output"], yr2sec)
+    checkpoint_config = parse_checkpoint_config(dict["checkpointing"], sim_dir, yr2sec)
 
     # Construct top-level config
+    sim_info = (
+        name = sim_name,
+        total_time = total_time,
+        output_dir = sim_dir
+    )
+
     config = SimulationConfig(
-        dict["simulation"]["name"],
-        dict["simulation"]["total_time"],
-        dict["simulation"]["output_dir"],
+        sim_info,
         mesh_config,
         physics_config,
         solvers_config,
@@ -92,11 +115,11 @@ function parse_physics_config(dict::Dict)::PhysicsConfig
 end
 
 """
-    parse_solvers_config(dict::Dict) -> SolverConfig
+    parse_solvers_config(dict::Dict, day2sec::Float64) -> SolverConfig
 
-Parse solver configuration from TOML dict.
+Parse solver configuration from TOML dict with time conversion.
 """
-function parse_solvers_config(dict::Dict)::SolverConfig
+function parse_solvers_config(dict::Dict, day2sec::Float64)::SolverConfig
     qs_config = QuasistaticConfig(
         dict["quasistatic"]["tolerance"],
         dict["quasistatic"]["max_iterations"],
@@ -108,9 +131,18 @@ function parse_solvers_config(dict::Dict)::SolverConfig
         dict["dynamic"]["velocity_threshold_dyn_to_qs"]
     )
 
+    # Convert dt_max from days to seconds if specified in days
+    dt_max = if haskey(dict, "dt_max_days")
+        dict["dt_max_days"] * day2sec
+    elseif haskey(dict, "dt_max")
+        dict["dt_max"]
+    else
+        error("Must specify either dt_max or dt_max_days in [solvers]")
+    end
+
     return SolverConfig(
         dict["cfl_number"],
-        dict["dt_max"],
+        dt_max,
         dict["dt_min_factor"],
         qs_config,
         dyn_config
@@ -118,11 +150,11 @@ function parse_solvers_config(dict::Dict)::SolverConfig
 end
 
 """
-    parse_output_config(dict::Dict) -> OutputConfig
+    parse_output_config(dict::Dict, yr2sec::Float64) -> OutputConfig
 
-Parse output configuration from TOML dict.
+Parse output configuration from TOML dict with time conversion.
 """
-function parse_output_config(dict::Dict)::OutputConfig
+function parse_output_config(dict::Dict, yr2sec::Float64)::OutputConfig
     fields_config = OutputFieldsConfig(
         dict["fields"]["displacement"],
         dict["fields"]["velocity"],
@@ -131,26 +163,47 @@ function parse_output_config(dict::Dict)::OutputConfig
         dict["fields"]["state_variable"]
     )
 
+    # Convert snapshot interval from years to seconds if specified in years
+    snapshot_interval = if haskey(dict, "snapshot_interval_years")
+        dict["snapshot_interval_years"] * yr2sec
+    elseif haskey(dict, "snapshot_interval")
+        dict["snapshot_interval"]
+    else
+        error("Must specify either snapshot_interval or snapshot_interval_years in [output]")
+    end
+
     return OutputConfig(
         dict["format"],
         dict["timeseries_depths"],
-        dict["snapshot_interval"],
+        snapshot_interval,
         dict["log_interval"],
         fields_config
     )
 end
 
 """
-    parse_checkpoint_config(dict::Dict) -> CheckpointConfig
+    parse_checkpoint_config(dict::Dict, sim_dir::String, yr2sec::Float64) -> CheckpointConfig
 
-Parse checkpointing configuration from TOML dict.
+Parse checkpointing configuration from TOML dict with time conversion.
 """
-function parse_checkpoint_config(dict::Dict)::CheckpointConfig
+function parse_checkpoint_config(dict::Dict, sim_dir::String, yr2sec::Float64)::CheckpointConfig
+    # Convert checkpoint interval from years to seconds if specified in years
+    interval = if haskey(dict, "interval_years")
+        dict["interval_years"] * yr2sec
+    elseif haskey(dict, "interval")
+        dict["interval"]
+    else
+        error("Must specify either interval or interval_years in [checkpointing]")
+    end
+
+    # Checkpoint directory inside simulation directory
+    ckpt_dir = joinpath(sim_dir, "checkpoints")
+
     return CheckpointConfig(
         dict["enabled"],
-        dict["interval"],
+        interval,
         dict["keep_last"],
-        dict["directory"]
+        ckpt_dir
     )
 end
 
@@ -167,7 +220,7 @@ Validate configuration parameters and throw errors if invalid.
 """
 function validate_config(config::SimulationConfig)
     # Simulation validation
-    config.total_time > 0 || error("total_time must be positive")
+    config.simulation.total_time > 0 || error("total_time must be positive")
 
     # Mesh validation
     config.mesh.polynomial_degree >= 1 || error("polynomial_degree must be >= 1")

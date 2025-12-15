@@ -4,31 +4,9 @@ Configuration parameter types for SEAS-SEME simulations.
 All parameters are loaded from TOML configuration files and validated.
 """
 
-"""
-    SimulationConfig
-
-Top-level configuration struct containing all simulation parameters.
-
-# Fields
-- `name::String`: Simulation name (used for output directories)
-- `total_time::Float64`: Total simulation time (seconds)
-- `output_dir::String`: Base directory for output files
-- `mesh::MeshConfig`: Mesh configuration
-- `physics::PhysicsConfig`: Physics parameters
-- `solvers::SolverConfig`: Solver settings
-- `output::OutputConfig`: Output configuration
-- `checkpointing::CheckpointConfig`: Checkpointing settings
-"""
-struct SimulationConfig
-    name::String
-    total_time::Float64
-    output_dir::String
-    mesh::MeshConfig
-    physics::PhysicsConfig
-    solvers::SolverConfig
-    output::OutputConfig
-    checkpointing::CheckpointConfig
-end
+# ============================================================================
+# Leaf types (no dependencies on other config types)
+# ============================================================================
 
 """
     MeshConfig
@@ -45,28 +23,6 @@ struct MeshConfig
 end
 
 """
-    PhysicsConfig
-
-Physical parameters for the simulation.
-
-# Fields
-- `plate_velocity::Float64`: Plate loading rate (m/s)
-- `reference_friction::Float64`: Reference friction coefficient (dimensionless)
-- `reference_slip_rate::Float64`: Reference slip rate Vo (m/s)
-- `density::Float64`: Material density (kg/m³)
-- `shear_velocity::Float64`: Shear wave velocity (m/s)
-- `initial_conditions::InitialConditionsConfig`: Initial condition parameters
-"""
-struct PhysicsConfig
-    plate_velocity::Float64
-    reference_friction::Float64
-    reference_slip_rate::Float64
-    density::Float64
-    shear_velocity::Float64
-    initial_conditions::InitialConditionsConfig
-end
-
-"""
     InitialConditionsConfig
 
 Configuration for initial conditions (stress, friction parameters).
@@ -80,26 +36,6 @@ struct InitialConditionsConfig
     type::String
     velocity_strengthening_shallow::Bool
     file::Union{String,Nothing}
-end
-
-"""
-    SolverConfig
-
-Solver configuration (quasistatic, dynamic, timestepping).
-
-# Fields
-- `cfl_number::Float64`: CFL number for stability (typically 0.5-0.6)
-- `dt_max::Float64`: Maximum timestep (seconds)
-- `dt_min_factor::Float64`: Factor for minimum timestep (dt_min = factor * dx/vs)
-- `quasistatic::QuasistaticConfig`: Quasistatic solver settings
-- `dynamic::DynamicConfig`: Dynamic solver settings
-"""
-struct SolverConfig
-    cfl_number::Float64
-    dt_max::Float64
-    dt_min_factor::Float64
-    quasistatic::QuasistaticConfig
-    dynamic::DynamicConfig
 end
 
 """
@@ -130,26 +66,6 @@ Dynamic solver parameters (explicit time integration).
 struct DynamicConfig
     velocity_threshold_qs_to_dyn::Float64
     velocity_threshold_dyn_to_qs::Float64
-end
-
-"""
-    OutputConfig
-
-Output configuration (HDF5, time series, snapshots).
-
-# Fields
-- `format::String`: Output format ("hdf5")
-- `timeseries_depths::Vector{Float64}`: Depths (km) for time series output
-- `snapshot_interval::Float64`: Time interval for full-field snapshots (seconds)
-- `log_interval::Int`: Iteration interval for console logging
-- `fields::OutputFieldsConfig`: Which fields to output
-"""
-struct OutputConfig
-    format::String
-    timeseries_depths::Vector{Float64}
-    snapshot_interval::Float64
-    log_interval::Int
-    fields::OutputFieldsConfig
 end
 
 """
@@ -188,4 +104,96 @@ struct CheckpointConfig
     interval::Float64
     keep_last::Int
     directory::String
+end
+
+# ============================================================================
+# Intermediate types (depend on leaf types)
+# ============================================================================
+
+"""
+    PhysicsConfig
+
+Physical parameters for the simulation.
+
+# Fields
+- `plate_velocity::Float64`: Plate loading rate (m/s)
+- `reference_friction::Float64`: Reference friction coefficient (dimensionless)
+- `reference_slip_rate::Float64`: Reference slip rate Vo (m/s)
+- `density::Float64`: Material density (kg/m³)
+- `shear_velocity::Float64`: Shear wave velocity (m/s)
+- `initial_conditions::InitialConditionsConfig`: Initial condition parameters
+"""
+struct PhysicsConfig
+    plate_velocity::Float64
+    reference_friction::Float64
+    reference_slip_rate::Float64
+    density::Float64
+    shear_velocity::Float64
+    initial_conditions::InitialConditionsConfig
+end
+
+"""
+    SolverConfig
+
+Solver configuration (quasistatic, dynamic, timestepping).
+
+# Fields
+- `cfl_number::Float64`: CFL number for stability (typically 0.5-0.6)
+- `dt_max::Float64`: Maximum timestep (seconds)
+- `dt_min_factor::Float64`: Factor for minimum timestep (dt_min = factor * dx/vs)
+- `quasistatic::QuasistaticConfig`: Quasistatic solver settings
+- `dynamic::DynamicConfig`: Dynamic solver settings
+"""
+struct SolverConfig
+    cfl_number::Float64
+    dt_max::Float64
+    dt_min_factor::Float64
+    quasistatic::QuasistaticConfig
+    dynamic::DynamicConfig
+end
+
+"""
+    OutputConfig
+
+Output configuration (HDF5, time series, snapshots).
+
+# Fields
+- `format::String`: Output format ("hdf5")
+- `timeseries_depths::Vector{Float64}`: Depths (km) for time series output
+- `snapshot_interval::Float64`: Time interval for full-field snapshots (seconds)
+- `log_interval::Int`: Iteration interval for console logging
+- `fields::OutputFieldsConfig`: Which fields to output
+"""
+struct OutputConfig
+    format::String
+    timeseries_depths::Vector{Float64}
+    snapshot_interval::Float64
+    log_interval::Int
+    fields::OutputFieldsConfig
+end
+
+# ============================================================================
+# Top-level type (depends on all other types)
+# ============================================================================
+
+"""
+    SimulationConfig
+
+Top-level configuration struct containing all simulation parameters.
+
+# Fields
+- `simulation::NamedTuple`: Simulation metadata (name, total_time, output_dir)
+- `mesh::MeshConfig`: Mesh configuration
+- `physics::PhysicsConfig`: Physics parameters
+- `solvers::SolverConfig`: Solver settings
+- `output::OutputConfig`: Output configuration
+- `checkpointing::CheckpointConfig`: Checkpointing settings
+"""
+struct SimulationConfig
+    simulation::NamedTuple{(:name, :total_time, :output_dir), Tuple{String, Float64, String}}
+    mesh::MeshConfig
+    physics::PhysicsConfig
+    solvers::SolverConfig
+    output::OutputConfig
+    checkpointing::CheckpointConfig
 end
