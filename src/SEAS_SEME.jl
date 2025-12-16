@@ -12,6 +12,7 @@ the Spectral Element Method (SEM) with rate-state friction.
 - `Solvers`: Time integration solvers (quasistatic, dynamic, fault boundary)
 - `Simulation`: Main simulation orchestration
 - `IO`: HDF5 output, checkpointing, logging
+- `Viz`: Visualization tools for simulation results
 """
 module SEAS_SEME
 
@@ -66,6 +67,8 @@ include("IO/HDF5Writer.jl")
 include("IO/Checkpointing.jl")
 include("IO/Logging.jl")
 include("IO/IO.jl")
+
+include("Viz/Viz.jl")
 
 # Public API exports
 export SimulationConfig, MeshConfig, PhysicsConfig, SolverConfig, OutputConfig, CheckpointConfig

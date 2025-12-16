@@ -181,6 +181,9 @@ function run!(simulation)
     println("="^80)
     println()
 
+    # Close logging
+    close_logging(simulation.log_io)
+
     return nothing
 end
 

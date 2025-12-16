@@ -23,6 +23,7 @@ Container for all simulation components.
 - `dyn_solver::DynamicSolver{T}`: Dynamic solver
 - `timestepper::AdaptiveTimestepper{T}`: Timestep controller
 - `io_manager`: I/O manager for output
+- `log_io::IO`: Log file IO stream
 - `M_global::Vector{T}`: Global mass matrix (diagonal)
 - `K_el::Array{T,3}`: Elemental stiffness matrices
 
@@ -44,6 +45,7 @@ struct Simulation{T<:AbstractFloat}
     dyn_solver::DynamicSolver{T}
     timestepper::AdaptiveTimestepper{T}
     io_manager
+    log_io::IO
     M_global::Vector{T}
     K_el::Array{T,3}
 end
@@ -79,6 +81,9 @@ run!(sim)
 ```
 """
 function build_simulation(config::SimulationConfig; T::Type=Float64)
+    # Setup logging to both console and file
+    _, log_io = setup_logging(config)
+
     println("\n" * "="^80)
     println("Building Simulation")
     println("="^80)
@@ -191,6 +196,7 @@ function build_simulation(config::SimulationConfig; T::Type=Float64)
     println("="^80)
     println("\nSimulation directory: $(config.simulation.output_dir)")
     println("├── config.toml")
+    println("├── output.log")
     println("├── params/")
     println("│   ├── friction_parameters.dat")
     println("│   ├── initial_stress.dat")
@@ -203,6 +209,6 @@ function build_simulation(config::SimulationConfig; T::Type=Float64)
     return Simulation{T}(
         config, mesh, physics, ics, params,
         state, qs_solver, dyn_solver, timestepper,
-        io_manager, M_global, K_el
+        io_manager, log_io, M_global, K_el
     )
 end
