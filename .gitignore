@@ -9,6 +9,8 @@
 
 plots/*
 data/*
+*.jld2
+*.h5
 
 !plots/README.md
 !data/README.md
