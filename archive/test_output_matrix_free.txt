@@ -1,0 +1,44 @@
+Building sparse matrix for AMG preconditioner...
+Building AMG hierarchy...
+  AMG levels: 7
+  Coarsest level size: 22
+  0.177955 seconds (313.93 k allocations: 258.711 MiB, 2.28% gc time, 65.57% compilation time)
+
+Minimum dt: 0.014 s
+Average node spacing along fault: 250.00 m
+Simulation Time: 1.00 years
+  CG iterations: 9, converged: true
+  CG iterations: 9, converged: true
+  CG iterations: 9, converged: true
+  CG iterations: 9, converged: true
+  CG iterations: 9, converged: true
+  CG iterations: 9, converged: true
+  CG iterations: 9, converged: true
+  CG iterations: 9, converged: true
+  CG iterations: 9, converged: true
+  CG iterations: 9, converged: true
+  CG iterations: 9, converged: true
+  CG iterations: 9, converged: true
+  CG iterations: 9, converged: true
+  CG iterations: 9, converged: true
+  CG iterations: 9, converged: true
+  CG iterations: 9, converged: true
+  CG iterations: 9, converged: true
+  CG iterations: 9, converged: true
+  CG iterations: 9, converged: true
+  CG iterations: 9, converged: true
+ 
+Solver = dynamic
+Iteration = 500
+Vfmax = 0.31848786402458107
+time = 3.6764540777194004e-7
+dt = 0.014434180138568129
+  CG iterations: 9, converged: true
+  CG iterations: 9, converged: true
+ 
+Solver = quasistatic
+Iteration = 1000
+Vfmax = 0.0018334024943591444
+time = 6.127447997941441e-7
+dt = 0.1286966000036951
+ 31.257708 seconds (64.65 M allocations: 47.923 GiB, 9.12% gc time, 3.50% compilation time)

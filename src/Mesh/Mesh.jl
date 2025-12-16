@@ -1,0 +1,201 @@
+"""
+Main mesh module: defines UnstructuredSEMesh type and constructor.
+
+This module ties together connectivity, geometry, and boundary extraction
+to create a complete spectral element mesh representation.
+"""
+
+"""
+    BoundaryInfo{T}
+
+Container for all boundary data (fault, creep, absorbing, free surface).
+
+# Fields
+- `fault::BoundaryData{T}`: Fault boundary nodes and impedance
+- `creep::BoundaryData{T}`: Creep boundary nodes and impedance
+- `absorbing::BoundaryData{T}`: Absorbing boundary nodes and impedance
+"""
+struct BoundaryInfo{T<:AbstractFloat}
+    fault::BoundaryData{T}
+    creep::BoundaryData{T}
+    absorbing::BoundaryData{T}
+end
+
+"""
+    UnstructuredSEMesh{T}
+
+Complete spectral element mesh with geometry, connectivity, and boundaries.
+
+# Fields
+- `trixi_mesh::UnstructuredMesh2D`: Underlying Trixi.jl mesh
+- `dof_id::Array{Int,3}`: Connectivity matrix [nnodes, nnodes, nelements]
+- `node_coords::Array{T,4}`: Node coordinates [2, nnodes, nnodes, nelements]
+- `jac_matrix::Array{T,5}`: Jacobian matrices [2, 2, nnodes, nnodes, nelements]
+- `jac_det::Array{T,3}`: Jacobian determinants [nnodes, nnodes, nelements]
+- `normal_dirs::Array{T,4}`: Normal vectors [2, nnodes, 4, nelements]
+- `boundaries::BoundaryInfo{T}`: Boundary node information
+- `ndof::Int`: Total number of global DOFs
+- `n_elements::Int`: Number of elements
+- `polynomial_degree::Int`: Polynomial degree (p)
+"""
+struct UnstructuredSEMesh{T<:AbstractFloat}
+    trixi_mesh::UnstructuredMesh2D
+    dof_id::Array{Int,3}
+    node_coords::Array{T,4}
+    jac_matrix::Array{T,5}
+    jac_det::Array{T,3}
+    normal_dirs::Array{T,4}
+    boundaries::BoundaryInfo{T}
+    ndof::Int
+    n_elements::Int
+    polynomial_degree::Int
+end
+
+"""
+    build_mesh(config::MeshConfig, physics::PhysicsConfig) -> UnstructuredSEMesh
+
+Construct a complete spectral element mesh from configuration.
+
+# Arguments
+- `config::MeshConfig`: Mesh configuration (file path, polynomial degree)
+- `physics::PhysicsConfig`: Physics configuration (density, shear velocity for impedance)
+
+# Returns
+- `UnstructuredSEMesh{Float64}`: Complete mesh with geometry and boundaries
+
+# Steps
+1. Load HOHQMesh file using Trixi.jl
+2. Build connectivity matrix (global DOF numbering)
+3. Compute node coordinates in physical space
+4. Compute Jacobian matrices and determinants
+5. Compute normal vectors on boundaries
+6. Extract boundary nodes (fault, creep, absorbing)
+
+# Example
+```julia
+config = load_config("config.toml")
+mesh = build_mesh(config.mesh, config.physics)
+```
+"""
+function build_mesh(config::MeshConfig, physics::PhysicsConfig)::UnstructuredSEMesh{Float64}
+    # Load mesh file
+    @info "Loading mesh from: $(config.file)"
+    if !isfile(config.file)
+        error("Mesh file not found: $(config.file)")
+    end
+
+    trixi_mesh = UnstructuredMesh2D(config.file)
+
+    # Check polynomial degree matches
+    if trixi_mesh.polydeg != config.polynomial_degree
+        @warn "Mesh polynomial degree ($(trixi_mesh.polydeg)) differs from config ($(config.polynomial_degree)). Using config value."
+        # Note: May need to regenerate mesh with correct polynomial degree
+    end
+
+    polydeg = config.polynomial_degree
+    nnodes = polydeg + 1
+    n_elements = trixi_mesh.n_elements
+
+    @info "Mesh: $(n_elements) elements, polynomial degree = $(polydeg)"
+
+    # Get Gauss-Lobatto basis
+    basis = LobattoLegendreBasis(polydeg)
+    nodes = basis.nodes
+
+    # 1. Build connectivity matrix
+    @info "Building connectivity matrix..."
+    dof_id = connectivity_matrix(trixi_mesh)
+    ndof = maximum(dof_id)
+    @info "Total DOFs: $(ndof)"
+
+    # 2. Allocate geometry arrays
+    node_coords = zeros(2, nnodes, nnodes, n_elements)
+    jac_matrix = zeros(2, 2, nnodes, nnodes, n_elements)
+    jac_det = zeros(nnodes, nnodes, n_elements)
+    normal_dirs = zeros(2, nnodes, 4, n_elements)
+
+    # 3. Compute geometry for each element
+    @info "Computing geometry (coordinates, Jacobians, normals)..."
+    for el in 1:n_elements
+        # Get element corner points
+        corners = trixi_mesh.corners[:, trixi_mesh.element_node_ids[:, el]]'
+
+        # Compute node coordinates
+        calc_node_coordinates!(node_coords, el, nodes, corners)
+
+        # Compute Jacobian matrices
+        calc_metric_terms!(jac_matrix, el, nodes, corners)
+
+        # Compute normal vectors
+        calc_normal_directions!(normal_dirs, el, nodes, corners)
+
+        # Compute Jacobian determinants
+        for i in 1:nnodes, j in 1:nnodes
+            jac_det[i, j, el] = det(jac_matrix[:, :, i, j, el])
+        end
+    end
+
+    # 4. Extract boundary information
+    @info "Extracting boundary nodes..."
+
+    # Material properties for impedance
+    ρ = physics.density
+    vs = physics.shear_velocity
+    impedance_absorbing = ρ * vs
+    impedance_fault = 1.0  # Fault/creep use unit impedance
+
+    # Extract fault boundary (right, upper half: 20-40 km)
+    fault_ids, fault_x, fault_y, fault_mat = get_boundary_nodes_structured(
+        trixi_mesh, node_coords, jac_matrix, basis.weights,
+        impedance_fault, dof_id, :fault
+    )
+
+    # Extract creep boundary (right, lower half: 0-20 km)
+    creep_ids, creep_x, creep_y, creep_mat = get_boundary_nodes_structured(
+        trixi_mesh, node_coords, jac_matrix, basis.weights,
+        impedance_fault, dof_id, :creep
+    )
+
+    # Extract absorbing boundary (left + bottom)
+    absorb_ids, absorb_x, absorb_y, absorb_mat = get_boundary_nodes_structured(
+        trixi_mesh, node_coords, jac_matrix, basis.weights,
+        impedance_absorbing, dof_id, :absorbing
+    )
+
+    # Create BoundaryData structs
+    fault_boundary = BoundaryData(
+        fault_ids,
+        hcat(fault_x, fault_y)',  # [2 x nnodes]
+        fault_mat
+    )
+
+    creep_boundary = BoundaryData(
+        creep_ids,
+        hcat(creep_x, creep_y)',
+        creep_mat
+    )
+
+    absorbing_boundary = BoundaryData(
+        absorb_ids,
+        hcat(absorb_x, absorb_y)',
+        absorb_mat
+    )
+
+    boundaries = BoundaryInfo(fault_boundary, creep_boundary, absorbing_boundary)
+
+    @info "Boundary nodes: fault=$(length(fault_ids)), creep=$(length(creep_ids)), absorbing=$(length(absorb_ids))"
+
+    # Construct complete mesh
+    return UnstructuredSEMesh(
+        trixi_mesh,
+        dof_id,
+        node_coords,
+        jac_matrix,
+        jac_det,
+        normal_dirs,
+        boundaries,
+        ndof,
+        n_elements,
+        polydeg
+    )
+end
