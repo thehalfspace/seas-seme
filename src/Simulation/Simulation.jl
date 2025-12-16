@@ -204,6 +204,8 @@ function build_simulation(config::SimulationConfig; T::Type=Float64)
     println("├── outputs/")
     println("│   └── $(config.simulation.name).h5")
     println("└── checkpoints/")
+    println("\nMesh: $(config.mesh.file)")
+    println("  $(mesh.n_elements) elements, polynomial degree $(mesh.polynomial_degree)")
     println("="^80)
 
     return Simulation{T}(

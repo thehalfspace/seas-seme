@@ -42,6 +42,7 @@ include("Config/Config.jl")
 include("Mesh/Connectivity.jl")
 include("Mesh/Geometry.jl")
 include("Mesh/Boundaries.jl")
+include("Mesh/Unstructured.jl")
 include("Mesh/Mesh.jl")
 
 include("Physics/RateStateFriction.jl")

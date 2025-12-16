@@ -22,6 +22,95 @@ struct BoundaryData{T<:AbstractFloat}
 end
 
 """
+    identify_boundaries_geometric(mesh, boundary_name) -> boundary_el_id
+
+Identify boundary elements by geometric location when boundary names are not preserved.
+
+This function analyzes the corner coordinates of boundary elements to determine
+which boundary they belong to based on spatial location.
+
+# Arguments
+- `mesh::UnstructuredMesh2D`: Trixi.jl mesh
+- `boundary_name::Symbol`: Boundary to identify (:fault, :creep, :absorbing, :free_surface)
+
+# Returns
+- `boundary_el_id::Vector{CartesianIndex}`: Indices into mesh.neighbour_information
+
+# Notes
+Assumes standard fault geometry:
+- Domain: x ∈ [0, Lx], y ∈ [0, Ly]
+- Fault: right edge (x = Lx) from y_fault to Ly
+- Creep: right edge (x = Lx) from 0 to y_fault
+- Absorbing: left edge (x = 0) and bottom edge (y = 0)
+- Free surface: top edge (y = Ly)
+"""
+function identify_boundaries_geometric(mesh::UnstructuredMesh2D, boundary_name::Symbol)
+    # Get domain extents from corners
+    x_coords = mesh.corners[1, :]
+    y_coords = mesh.corners[2, :]
+
+    x_min, x_max = extrema(x_coords)
+    y_min, y_max = extrema(y_coords)
+
+    # Tolerance for boundary identification (1% of domain size)
+    tol_x = 0.01 * (x_max - x_min)
+    tol_y = 0.01 * (y_max - y_min)
+
+    # Estimate fault start (assume middle of right edge)
+    y_fault = 0.5 * (y_min + y_max)
+
+    boundary_el_id = CartesianIndex{2}[]
+
+    # Loop through all boundary elements
+    for i in 1:mesh.n_boundaries
+        # Get the two corner nodes of this boundary edge
+        node1_idx = mesh.neighbour_information[1, i]
+        node2_idx = mesh.neighbour_information[2, i]
+
+        x1, y1 = mesh.corners[1, node1_idx], mesh.corners[2, node1_idx]
+        x2, y2 = mesh.corners[1, node2_idx], mesh.corners[2, node2_idx]
+
+        # Midpoint of boundary edge
+        x_mid = 0.5 * (x1 + x2)
+        y_mid = 0.5 * (y1 + y2)
+
+        # Determine which boundary this belongs to
+        on_left = abs(x_mid - x_min) < tol_x
+        on_right = abs(x_mid - x_max) < tol_x
+        on_bottom = abs(y_mid - y_min) < tol_y
+        on_top = abs(y_mid - y_max) < tol_y
+
+        # Get element and surface IDs
+        element_id = mesh.neighbour_information[4, i]
+        surface_id = mesh.neighbour_information[5, i]
+
+        # Classify boundary
+        if boundary_name == :absorbing
+            if on_left || on_bottom
+                push!(boundary_el_id, CartesianIndex(surface_id, element_id))
+            end
+
+        elseif boundary_name == :free_surface
+            if on_top
+                push!(boundary_el_id, CartesianIndex(surface_id, element_id))
+            end
+
+        elseif boundary_name == :fault
+            if on_right && y_mid >= y_fault - tol_y
+                push!(boundary_el_id, CartesianIndex(surface_id, element_id))
+            end
+
+        elseif boundary_name == :creep
+            if on_right && y_mid <= y_fault + tol_y
+                push!(boundary_el_id, CartesianIndex(surface_id, element_id))
+            end
+        end
+    end
+
+    return boundary_el_id
+end
+
+"""
     get_boundary_nodes_structured(mesh, node_coords, jac_matrix, weights, impedance, dof_id, boundary_name)
         -> (node_ids, x_coords, y_coords, matrix)
 
@@ -61,27 +150,44 @@ function get_boundary_nodes_structured(
     nnodes = polydeg + 1
 
     # Identify boundary elements based on name
+    # For structured meshes: use symbolic boundary names
+    # For unstructured meshes: use geometric location (boundary names may not be preserved)
+
+    # Try to find boundaries by name first (works for structured meshes)
     if boundary_name == :absorbing
-        # Left and Bottom boundaries are absorbing
-        boundary_el_id = unique(
-            vcat(
-                findall(mesh.boundary_names .== :Left),
-                findall(mesh.boundary_names .== :Bottom)
-            )
-        )
+        # Try structured mesh names first
+        boundary_el_id_left = findall(mesh.boundary_names .== :Left)
+        boundary_el_id_bottom = findall(mesh.boundary_names .== :Bottom)
+        boundary_el_id = unique(vcat(boundary_el_id_left, boundary_el_id_bottom))
+
+        # If no named boundaries found, use geometric identification
+        if isempty(boundary_el_id)
+            boundary_el_id = identify_boundaries_geometric(mesh, :absorbing)
+        end
 
     elseif boundary_name == :free_surface
         boundary_el_id = findall(mesh.boundary_names .== :Top)
+        if isempty(boundary_el_id)
+            boundary_el_id = identify_boundaries_geometric(mesh, :free_surface)
+        end
 
     elseif boundary_name == :fault
-        # Right boundary, upper half (20-40 km depth)
-        id_temp = findall(mesh.boundary_names .== :Right)
-        boundary_el_id = id_temp[div(length(id_temp), 2)+1:end]
+        # For structured mesh: upper half of right boundary
+        boundary_el_id_right = findall(mesh.boundary_names .== :Right)
+        if !isempty(boundary_el_id_right)
+            boundary_el_id = boundary_el_id_right[div(length(boundary_el_id_right), 2)+1:end]
+        else
+            boundary_el_id = identify_boundaries_geometric(mesh, :fault)
+        end
 
     elseif boundary_name == :creep
-        # Right boundary, lower half (0-20 km depth)
-        id_temp = findall(mesh.boundary_names .== :Right)
-        boundary_el_id = id_temp[1:div(length(id_temp), 2)]
+        # For structured mesh: lower half of right boundary
+        boundary_el_id_right = findall(mesh.boundary_names .== :Right)
+        if !isempty(boundary_el_id_right)
+            boundary_el_id = boundary_el_id_right[1:div(length(boundary_el_id_right), 2)]
+        else
+            boundary_el_id = identify_boundaries_geometric(mesh, :creep)
+        end
 
     else
         error("Unknown boundary name: $boundary_name")
