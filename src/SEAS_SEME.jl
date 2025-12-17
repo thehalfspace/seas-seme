@@ -41,6 +41,8 @@ include("Config/Config.jl")
 
 include("Mesh/Connectivity.jl")
 include("Mesh/Geometry.jl")
+include("Mesh/Faces.jl")
+include("Mesh/GeometricChecks.jl")
 include("Mesh/Boundaries.jl")
 include("Mesh/Unstructured.jl")
 include("Mesh/Mesh.jl")
