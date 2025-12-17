@@ -71,16 +71,26 @@ function elemental_stiffness_matrix(
         denomηη = δx_δη * δx_δη + δy_δη * δy_δη
 
         # Check for division by zero and compute weights
+        # Log extreme values for debugging
+        if any([abs(denomξξ), abs(denomξη), abs(denomηξ), abs(denomηη)]) < 1e-20
+            @warn "Very small denominator detected!" denomξξ denomξη denomηξ denomηη i j
+        end
+
         if denomξξ != 0
             Wξξ[i, j] = w2[i, j] * μ * jac_det[i, j] / denomξξ
+            # Clamp to prevent extreme values
+            if abs(Wξξ[i, j]) > 1e16
+                @warn "Extreme Wξξ value" Wξξ[i,j] denomξξ jac_det=jac_det[i,j] i j
+                Wξξ[i, j] = sign(Wξξ[i, j]) * 1e16
+            end
         end
-        if denomξη != 0
+        if abs(denomξη) > min_denom
             Wξη[i, j] = w2[i, j] * μ * jac_det[i, j] / denomξη
         end
-        if denomηξ != 0
+        if abs(denomηξ) > min_denom
             Wηξ[i, j] = w2[i, j] * μ * jac_det[i, j] / denomηξ
         end
-        if denomηη != 0
+        if abs(denomηη) > min_denom
             Wηη[i, j] = w2[i, j] * μ * jac_det[i, j] / denomηη
         end
 
@@ -173,6 +183,23 @@ function build_stiffness_matrices(
             mesh.jac_det[:, :, el],
             basis
         )
+    end
+
+    # Diagnostic: check for extreme values
+    K_max = maximum(abs.(K_el))
+    K_min = minimum(abs.(filter(!iszero, K_el)))
+    @info "Stiffness matrix stats" K_max K_min material_μ=material.μ
+    if K_max > 1e15 || K_min < 1e-10
+        @warn "Extreme stiffness matrix values detected - likely bad Jacobians!"
+        # Find which element has the problem
+        for el in 1:n_elements
+            K_el_max = maximum(abs.(K_el[:, :, el]))
+            if K_el_max > 1e15
+                jac_det_el = mesh.jac_det[:, :, el]
+                @warn "Element $el has extreme stiffness" K_el_max jac_det_min=minimum(jac_det_el) jac_det_max=maximum(jac_det_el)
+                break
+            end
+        end
     end
 
     return K_el

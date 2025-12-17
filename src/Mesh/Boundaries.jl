@@ -114,7 +114,7 @@ end
     get_boundary_nodes_structured(mesh, node_coords, jac_matrix, weights, impedance, dof_id, boundary_name)
         -> (node_ids, x_coords, y_coords, matrix)
 
-Extract boundary nodes for structured meshes with axis-aligned boundaries.
+Extract boundary nodes from HOHQMesh-generated meshes using boundary names.
 
 # Arguments
 - `mesh::UnstructuredMesh2D`: Trixi.jl mesh
@@ -132,8 +132,8 @@ Extract boundary nodes for structured meshes with axis-aligned boundaries.
 - `matrix::Vector`: Impedance matrix contributions (summed for shared nodes)
 
 # Notes
-- For structured mesh, Right boundary is split: top half = fault, bottom half = creep
-- Left and Bottom boundaries = absorbing
+- Uses boundary names from HOHQMesh control file (stored in mesh.boundary_names)
+- Falls back to geometric identification if boundary names not found
 - Impedance matrix: weights[i] * jac1D[i] * impedance
 - jac1D computed from Ampuero SEM notes (p. 23)
 """
@@ -149,48 +149,23 @@ function get_boundary_nodes_structured(
     polydeg = mesh.polydeg
     nnodes = polydeg + 1
 
-    # Identify boundary elements based on name
-    # For structured meshes: use symbolic boundary names
-    # For unstructured meshes: use geometric location (boundary names may not be preserved)
-
-    # Try to find boundaries by name first (works for structured meshes)
+    # Identify boundary elements based on name from HOHQMesh control file
+    # HOHQMesh preserves boundary names as symbols in mesh.boundary_names
     if boundary_name == :absorbing
-        # Try structured mesh names first
-        boundary_el_id_left = findall(mesh.boundary_names .== :Left)
-        boundary_el_id_bottom = findall(mesh.boundary_names .== :Bottom)
-        boundary_el_id = unique(vcat(boundary_el_id_left, boundary_el_id_bottom))
-
-        # If no named boundaries found, use geometric identification
-        if isempty(boundary_el_id)
-            boundary_el_id = identify_boundaries_geometric(mesh, :absorbing)
-        end
-
+        boundary_el_id = findall(mesh.boundary_names .== :absorbing)
     elseif boundary_name == :free_surface
-        boundary_el_id = findall(mesh.boundary_names .== :Top)
-        if isempty(boundary_el_id)
-            boundary_el_id = identify_boundaries_geometric(mesh, :free_surface)
-        end
-
+        boundary_el_id = findall(mesh.boundary_names .== :free_surface)
     elseif boundary_name == :fault
-        # For structured mesh: upper half of right boundary
-        boundary_el_id_right = findall(mesh.boundary_names .== :Right)
-        if !isempty(boundary_el_id_right)
-            boundary_el_id = boundary_el_id_right[div(length(boundary_el_id_right), 2)+1:end]
-        else
-            boundary_el_id = identify_boundaries_geometric(mesh, :fault)
-        end
-
+        boundary_el_id = findall(mesh.boundary_names .== :fault)
     elseif boundary_name == :creep
-        # For structured mesh: lower half of right boundary
-        boundary_el_id_right = findall(mesh.boundary_names .== :Right)
-        if !isempty(boundary_el_id_right)
-            boundary_el_id = boundary_el_id_right[1:div(length(boundary_el_id_right), 2)]
-        else
-            boundary_el_id = identify_boundaries_geometric(mesh, :creep)
-        end
-
+        boundary_el_id = findall(mesh.boundary_names .== :creep)
     else
         error("Unknown boundary name: $boundary_name")
+    end
+
+    # Error if boundary not found (means mesh doesn't have proper boundary names)
+    if isempty(boundary_el_id)
+        error("Boundary '$boundary_name' not found in mesh. Check that mesh file has proper boundary names from HOHQMesh control file.")
     end
 
     # Initialize storage
@@ -211,17 +186,21 @@ function get_boundary_nodes_structured(
 
         # Compute 1D Jacobian for boundary integration
         # From Ampuero SEM Notes page 23
-        if surface == 1  # Bottom: sqrt((dx/dξ)² + (dy/dξ)²)
-            jac1D = sqrt.(jac[1, 1, 1, :] .^ 2 .+ jac[2, 1, 1, :] .^ 2)
+        # Jacobian storage format: jac[spatial_dim, ref_dim, i, j]
+        # where (i,j) are node indices: i=ξ direction, j=η direction
+        #
+        # For unstructured meshes, must extract Jacobian along the actual boundary edge!
+        if surface == 1  # Bottom (η = -1, j = 1): sqrt((dx/dξ)² + (dy/dξ)²)
+            jac1D = sqrt.(jac[1, 1, :, 1] .^ 2 .+ jac[2, 1, :, 1] .^ 2)
 
-        elseif surface == 2  # Right: sqrt((dx/dη)² + (dy/dη)²)
-            jac1D = sqrt.(jac[1, 2, :, end] .^ 2 .+ jac[2, 2, :, end] .^ 2)
+        elseif surface == 2  # Right (ξ = 1, i = end): sqrt((dx/dη)² + (dy/dη)²)
+            jac1D = sqrt.(jac[1, 2, end, :] .^ 2 .+ jac[2, 2, end, :] .^ 2)
 
-        elseif surface == 3  # Top: sqrt((dx/dξ)² + (dy/dξ)²)
-            jac1D = sqrt.(jac[1, 1, end, :] .^ 2 .+ jac[2, 1, end, :] .^ 2)
+        elseif surface == 3  # Top (η = 1, j = end): sqrt((dx/dξ)² + (dy/dξ)²)
+            jac1D = sqrt.(jac[1, 1, :, end] .^ 2 .+ jac[2, 1, :, end] .^ 2)
 
-        elseif surface == 4  # Left: sqrt((dx/dη)² + (dy/dη)²)
-            jac1D = sqrt.(jac[1, 2, :, 1] .^ 2 .+ jac[2, 2, :, 1] .^ 2)
+        elseif surface == 4  # Left (ξ = -1, i = 1): sqrt((dx/dη)² + (dy/dη)²)
+            jac1D = sqrt.(jac[1, 2, 1, :] .^ 2 .+ jac[2, 2, 1, :] .^ 2)
 
         else
             error("Invalid surface ID: $surface")

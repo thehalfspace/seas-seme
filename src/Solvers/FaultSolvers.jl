@@ -35,12 +35,26 @@ The `fact` parameter (velocity weakening factor) is set to 1 for quasi-static re
 """
 function fault_slip_rate(ψ::T, τ::T, τ_init::T, σ_n::T,
                         a::T, b::T, V₀::T, f₀::T) where T<:Real
+    # Safety checks for numerical stability
+    if a <= 0
+        error("Rate-state parameter 'a' must be positive, got a=$a")
+    end
+    if σ_n <= 0
+        error("Normal stress must be positive (compressive), got σ_n=$σ_n")
+    end
+
     fact = one(T)  # For quasi-static: fact = 1
 
     term1 = fact * (τ + τ_init) / (σ_n * a)
     term2 = -(f₀ + b * ψ) / a
 
-    return V₀ * (exp(term2 + term1) - exp(term2 - term1))
+    # Clamp exponential arguments to prevent overflow
+    # exp(700) ≈ 1e304, exp(-700) ≈ 3e-305 for Float64
+    max_exp_arg = T(700)
+    arg_plus = clamp(term2 + term1, -max_exp_arg, max_exp_arg)
+    arg_minus = clamp(term2 - term1, -max_exp_arg, max_exp_arg)
+
+    return V₀ * (exp(arg_plus) - exp(arg_minus))
 end
 
 
@@ -65,15 +79,43 @@ different from standard aging law integration. Handles both small and large
 slip regimes with appropriate approximations.
 """
 function state_time_evolution(ψ_old::T, V::T, dt::T, Lc::T, V₀::T) where T<:Real
+    # Safety checks
+    if Lc <= 0
+        error("Critical slip distance must be positive, got Lc=$Lc")
+    end
+    if dt < 0
+        error("Time step must be non-negative, got dt=$dt")
+    end
+
     Vdt_L = abs(V) * dt / Lc
 
     if Vdt_L < V₀
         # Small slip regime
-        return log(exp(ψ_old - Vdt_L) + V₀ * dt / Lc -
-                  0.5 * V₀ * abs(V) * dt^2 / Lc^2)
+        # Clamp exponential argument to prevent overflow
+        exp_arg = clamp(ψ_old - Vdt_L, T(-700), T(700))
+        log_arg = exp(exp_arg) + V₀ * dt / Lc - 0.5 * V₀ * abs(V) * dt^2 / Lc^2
+
+        # Ensure log argument is positive
+        if log_arg <= 0
+            @warn "Non-positive argument to log in state evolution (small slip)" log_arg V dt Lc
+            return ψ_old  # Return previous state as fallback
+        end
+
+        return log(log_arg)
     else
         # Large slip regime
-        return log(exp(ψ_old - Vdt_L) + (V₀ / abs(V)) * (1 - exp(-Vdt_L)))
+        exp_arg1 = clamp(ψ_old - Vdt_L, T(-700), T(700))
+        exp_arg2 = clamp(-Vdt_L, T(-700), T(700))
+
+        log_arg = exp(exp_arg1) + (V₀ / abs(V)) * (1 - exp(exp_arg2))
+
+        # Ensure log argument is positive
+        if log_arg <= 0
+            @warn "Non-positive argument to log in state evolution (large slip)" log_arg V dt Lc
+            return ψ_old  # Return previous state as fallback
+        end
+
+        return log(log_arg)
     end
 end
 
