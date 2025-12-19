@@ -261,8 +261,6 @@ function connectivity_matrix(mesh::UnstructuredMesh2D)::Array{Int,3}
         @info "✓ CG connectivity successful: nodes shared across interfaces" total_dofs dg_dofs reduction=round((1 - total_dofs/dg_dofs)*100, digits=1)
     end
 
-    print(dof_id)
-
     return dof_id
 end
 

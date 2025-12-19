@@ -55,6 +55,9 @@ function elemental_stiffness_matrix(
     Wηξ = zeros(T, nnodes, nnodes)
     Wηη = zeros(T, nnodes, nnodes)
 
+    # Minimum denominator threshold to avoid division by very small numbers
+    min_denom = 1e-20
+
     # Compute weight matrices incorporating Jacobian and shear modulus
     for i in 1:nnodes, j in 1:nnodes
         # Extract Jacobian components
@@ -72,7 +75,7 @@ function elemental_stiffness_matrix(
 
         # Check for division by zero and compute weights
         # Log extreme values for debugging
-        if any([abs(denomξξ), abs(denomξη), abs(denomηξ), abs(denomηη)]) < 1e-20
+        if any([abs(denomξξ) < 1e-20, abs(denomξη) < 1e-20, abs(denomηξ) < 1e-20, abs(denomηη) < 1e-20])
             @warn "Very small denominator detected!" denomξξ denomξη denomηξ denomηη i j
         end
 
