@@ -130,6 +130,10 @@ function connectivity_matrix(mesh::UnstructuredMesh2D)::Array{Int,3}
 
     # Step 2: Process all interior interfaces and union shared nodes
     for i in 1:size(mesh.neighbour_information, 2)
+        # Global edge orientation defined by corner nodes
+        corner1_global = mesh.neighbour_information[1, i]  # Global corner ID (start)
+        corner2_global = mesh.neighbour_information[2, i]  # Global corner ID (end)
+
         el1 = mesh.neighbour_information[3, i]
         el2 = mesh.neighbour_information[4, i]
         surf1_raw = mesh.neighbour_information[5, i]
@@ -140,14 +144,14 @@ function connectivity_matrix(mesh::UnstructuredMesh2D)::Array{Int,3}
             continue
         end
 
-        # Get face nodes from both elements
+        # Get face nodes from both elements in canonical order
         surf1_abs = abs(surf1_raw)
         surf2_abs = abs(surf2_raw)
 
         i1_idx, j1_idx = canonical_face_nodes(surf1_abs, nnodes)
         i2_idx, j2_idx = canonical_face_nodes(surf2_abs, nnodes)
 
-        # Extract node indices for both faces
+        # Extract node indices for both faces in canonical order
         nodes1 = if i1_idx isa Int
             [(i1_idx, j) for j in j1_idx]
         else
@@ -160,17 +164,54 @@ function connectivity_matrix(mesh::UnstructuredMesh2D)::Array{Int,3}
             [(i, j2_idx) for i in i2_idx]
         end
 
-        # Apply flip if needed
-        if surf1_raw < 0
+        # Determine if canonical ordering matches global edge direction
+        # by checking which corners are at the endpoints
+        #
+        # The mesh.element_node_ids gives us the corner nodes for each element
+        el1_corners = mesh.element_node_ids[:, el1]  # 4 corners, counterclockwise
+        el2_corners = mesh.element_node_ids[:, el2]
+
+        # Map local face to its corner endpoints in canonical traversal order
+        # Face 1 (bottom, η=-1): i varies 1→nnodes, corners are el_corners[1]→el_corners[2]
+        # Face 2 (right, ξ=+1):  j varies 1→nnodes, corners are el_corners[2]→el_corners[3]
+        # Face 3 (top, η=+1):    i varies 1→nnodes, corners are el_corners[4]→el_corners[3]
+        # Face 4 (left, ξ=-1):   j varies 1→nnodes, corners are el_corners[1]→el_corners[4]
+        local_corners1 = if surf1_abs == 1
+            (el1_corners[1], el1_corners[2])
+        elseif surf1_abs == 2
+            (el1_corners[2], el1_corners[3])
+        elseif surf1_abs == 3
+            (el1_corners[4], el1_corners[3])
+        else  # surf1_abs == 4
+            (el1_corners[1], el1_corners[4])
+        end
+
+        local_corners2 = if surf2_abs == 1
+            (el2_corners[1], el2_corners[2])
+        elseif surf2_abs == 2
+            (el2_corners[2], el2_corners[3])
+        elseif surf2_abs == 3
+            (el2_corners[4], el2_corners[3])
+        else  # surf2_abs == 4
+            (el2_corners[1], el2_corners[4])
+        end
+
+        # Determine if we need to reverse nodes to match global orientation
+        # Global orientation is corner1_global → corner2_global
+        #
+        # Reverse if local traversal goes corner2→corner1 instead of corner1→corner2
+        reverse1 = (local_corners1[1] == corner2_global && local_corners1[2] == corner1_global)
+        reverse2 = (local_corners2[1] == corner2_global && local_corners2[2] == corner1_global)
+
+        # Apply reversal if needed
+        if reverse1
             nodes1 = reverse(nodes1)
         end
-        if surf2_raw < 0
+        if reverse2
             nodes2 = reverse(nodes2)
         end
 
-        # Interface faces point in opposite directions, so reverse one side
-        nodes2 = reverse(nodes2)
-
+        # Now both nodes1 and nodes2 are oriented consistently with the global edge
         # Union corresponding nodes
         for k in 1:nnodes
             i1, j1 = nodes1[k]
@@ -219,6 +260,8 @@ function connectivity_matrix(mesh::UnstructuredMesh2D)::Array{Int,3}
     else
         @info "✓ CG connectivity successful: nodes shared across interfaces" total_dofs dg_dofs reduction=round((1 - total_dofs/dg_dofs)*100, digits=1)
     end
+
+    print(dof_id)
 
     return dof_id
 end
