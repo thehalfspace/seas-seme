@@ -176,21 +176,21 @@ function build_mesh(config::MeshConfig, physics::PhysicsConfig)::UnstructuredSEM
     impedance_fault = 1.0  # Fault/creep use unit impedance
 
     # Extract fault boundary (right, upper half: 20-40 km)
-    fault_ids, fault_x, fault_y, fault_mat = get_boundary_nodes_structured(
+    fault_ids, fault_x, fault_y, fault_mat = get_boundary_nodes(
         trixi_mesh, node_coords, jac_matrix, basis.weights,
-        impedance_fault, dof_id, :fault
+        impedance_fault, dof_id, :fault, nodes, face_map
     )
 
     # Extract creep boundary (right, lower half: 0-20 km)
-    creep_ids, creep_x, creep_y, creep_mat = get_boundary_nodes_structured(
+    creep_ids, creep_x, creep_y, creep_mat = get_boundary_nodes(
         trixi_mesh, node_coords, jac_matrix, basis.weights,
-        impedance_fault, dof_id, :creep
+        impedance_fault, dof_id, :creep, nodes, face_map
     )
 
     # Extract absorbing boundary (left + bottom)
-    absorb_ids, absorb_x, absorb_y, absorb_mat = get_boundary_nodes_structured(
+    absorb_ids, absorb_x, absorb_y, absorb_mat = get_boundary_nodes(
         trixi_mesh, node_coords, jac_matrix, basis.weights,
-        impedance_absorbing, dof_id, :absorbing
+        impedance_absorbing, dof_id, :absorbing, nodes, face_map
     )
 
     # Create BoundaryData structs

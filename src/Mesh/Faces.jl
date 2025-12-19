@@ -447,16 +447,24 @@ function build_face_map(mesh::UnstructuredMesh2D)
     for i in 1:size(mesh.neighbour_information, 2)
         el1 = mesh.neighbour_information[3, i]
         el2 = mesh.neighbour_information[4, i]
-        surf1 = mesh.neighbour_information[5, i]
-        surf2 = mesh.neighbour_information[6, i]
+        surf1_raw = mesh.neighbour_information[5, i]
+        surf2_raw = mesh.neighbour_information[6, i]
+
+        # Extract canonical face ID (1-4) and initial flip from sign
+        # Negative surface ID means reversed orientation in Trixi.jl
+        surf1 = abs(surf1_raw)
+        flip1 = surf1_raw < 0
 
         # Boundary face?
-        if el2 == 0 || surf2 == 0
+        if el2 == 0 || surf2_raw == 0
             # Get boundary name from mesh
-            boundary_name = mesh.boundary_names[i]
+            # mesh.boundary_names is indexed as: (element-1)*4 + surface_id
+            # where surface_id is the absolute value (canonical 1-4)
+            linear_idx = (el1 - 1) * 4 + surf1
+            boundary_name = mesh.boundary_names[linear_idx]
 
-            # Create face (no flip for boundary - handled in extraction)
-            face = Face(el1, surf1, false)
+            # Create face with initial flip from mesh orientation
+            face = Face(el1, surf1, flip1)
             face_info = FaceInfo(face, boundary_name)
 
             push!(faces, face_info)
@@ -469,13 +477,13 @@ function build_face_map(mesh::UnstructuredMesh2D)
 
         else
             # Interior face
-            # Determine flip: do the faces have same or reversed node ordering?
-            # For now, assume no flip (would need DOF connectivity to determine)
-            # This will be refined in a separate function
-            flip = false
+            surf2 = abs(surf2_raw)
+            flip2 = surf2_raw < 0
 
-            face = Face(el1, surf1, flip)
-            face_info = FaceInfo(face, el2, surf2, false)  # neighbor_flip also TBD
+            # Initial flip from mesh orientation
+            # This will be refined in determine_face_flips! based on DOF connectivity
+            face = Face(el1, surf1, flip1)
+            face_info = FaceInfo(face, el2, surf2, flip2)
 
             push!(faces, face_info)
         end

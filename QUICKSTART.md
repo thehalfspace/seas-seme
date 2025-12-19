@@ -31,46 +31,22 @@ julia> # Should load without errors
 
 ### 1. Check Example Configuration
 
-The example config is at `examples/config/strike_slip_2d.toml`. Key parameters:
+The example config is at `config/strike_slip_2d.toml`. Key parameters:
 
-```toml
-[simulation]
-total_time = 6.31152e8  # 20 years in seconds
-
-[mesh]
-file = "./data/structured.mesh"  # ← Make sure this file exists!
-
-[solvers]
-dt_max = 8.64e6  # 100 days
-```
 
 ### 2. Verify Mesh File
 
 **Important:** Check that your mesh file exists:
 ```bash
-ls -lh data/structured.mesh
+ls -lh data/mesh/unstructured/unstructured.mesh
 ```
 
 If missing, you need to generate it first. The mesh should be in Trixi/HOHQMesh format.
 
-### 3. Run a Short Test (Recommended First)
-
-For initial testing, modify the config to run just 1 year:
-
-```bash
-# Create a test config
-cp examples/config/strike_slip_2d.toml examples/config/test_short.toml
-```
-
-Edit `test_short.toml`:
-```toml
-[simulation]
-total_time = 3.15576e7  # 1 year instead of 20
-```
 
 Then run:
 ```bash
-julia --project=. examples/scripts/run_simulation.jl examples/config/test_short.toml
+julia --project=. scripts/run_simulation.jl config/strike_slip_2d.toml
 ```
 
 ### 4. Expected Output
