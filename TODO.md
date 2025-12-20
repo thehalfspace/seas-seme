@@ -1,6 +1,7 @@
 Things to do (07/13):
 
 Immediate:
+- Negative depths/surface handling: prone to errors.
 - ~~Remove unused variables and clean code.~~
 - Add comments and quickstart guide. Add references as well.
 - ~~Mention the caveats and limitations in each code function.~~ 

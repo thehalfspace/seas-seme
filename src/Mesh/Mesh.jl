@@ -34,6 +34,7 @@ Complete spectral element mesh with geometry, connectivity, and boundaries.
 - `jac_det::Array{T,3}`: Jacobian determinants [nnodes, nnodes, nelements]
 - `normal_dirs::Array{T,4}`: Normal vectors [2, nnodes, 4, nelements]
 - `boundaries::BoundaryInfo{T}`: Boundary node information
+- `face_map::FaceMap`: Face abstraction (single source of truth for faces)
 - `ndof::Int`: Total number of global DOFs
 - `n_elements::Int`: Number of elements
 - `polynomial_degree::Int`: Polynomial degree (p)
@@ -46,6 +47,7 @@ struct UnstructuredSEMesh{T<:AbstractFloat}
     jac_det::Array{T,3}
     normal_dirs::Array{T,4}
     boundaries::BoundaryInfo{T}
+    face_map::FaceMap
     ndof::Int
     n_elements::Int
     polynomial_degree::Int
@@ -135,7 +137,36 @@ function build_mesh(config::MeshConfig, physics::PhysicsConfig)::UnstructuredSEM
         end
     end
 
-    # 4. Extract boundary information
+    # 4. Build face map (single source of truth for all faces)
+    @info "Building face map..."
+    face_map = build_face_map(trixi_mesh)
+    determine_face_flips!(face_map, dof_id)
+
+    # Run geometric checks if enabled
+    if get(ENV, "SEAS_SEME_GEOMETRIC_CHECKS", "0") == "1"
+        @info "Running geometric invariant checks..."
+        try
+            check_jacobian_determinant_all(jac_matrix)
+            @info "  ✓ Jacobian determinants positive"
+
+            # Check edge lengths for sample of boundary faces
+            for (boundary_name, face_indices) in face_map.boundary_faces
+                for idx in face_indices[1:min(5, length(face_indices))]  # Check first 5 faces
+                    face_info = face_map.faces[idx]
+                    face = face_info.face
+                    el = face.element
+                    corners = trixi_mesh.corners[:, trixi_mesh.element_node_ids[:, el]]'
+                    geom = face_geometry(face, nodes, corners, jac_matrix[:, :, :, :, el])
+                    check_edge_length(geom, basis.weights)
+                end
+            end
+            @info "  ✓ Edge length checks passed"
+        catch e
+            @warn "Geometric check failed" exception=e
+        end
+    end
+
+    # 5. Extract boundary information
     @info "Extracting boundary nodes..."
 
     # Material properties for impedance
@@ -145,21 +176,21 @@ function build_mesh(config::MeshConfig, physics::PhysicsConfig)::UnstructuredSEM
     impedance_fault = 1.0  # Fault/creep use unit impedance
 
     # Extract fault boundary (right, upper half: 20-40 km)
-    fault_ids, fault_x, fault_y, fault_mat = get_boundary_nodes_structured(
+    fault_ids, fault_x, fault_y, fault_mat = get_boundary_nodes(
         trixi_mesh, node_coords, jac_matrix, basis.weights,
-        impedance_fault, dof_id, :fault
+        impedance_fault, dof_id, :fault, nodes, face_map
     )
 
     # Extract creep boundary (right, lower half: 0-20 km)
-    creep_ids, creep_x, creep_y, creep_mat = get_boundary_nodes_structured(
+    creep_ids, creep_x, creep_y, creep_mat = get_boundary_nodes(
         trixi_mesh, node_coords, jac_matrix, basis.weights,
-        impedance_fault, dof_id, :creep
+        impedance_fault, dof_id, :creep, nodes, face_map
     )
 
     # Extract absorbing boundary (left + bottom)
-    absorb_ids, absorb_x, absorb_y, absorb_mat = get_boundary_nodes_structured(
+    absorb_ids, absorb_x, absorb_y, absorb_mat = get_boundary_nodes(
         trixi_mesh, node_coords, jac_matrix, basis.weights,
-        impedance_absorbing, dof_id, :absorbing
+        impedance_absorbing, dof_id, :absorbing, nodes, face_map
     )
 
     # Create BoundaryData structs
@@ -194,6 +225,7 @@ function build_mesh(config::MeshConfig, physics::PhysicsConfig)::UnstructuredSEM
         jac_det,
         normal_dirs,
         boundaries,
+        face_map,
         ndof,
         n_elements,
         polydeg

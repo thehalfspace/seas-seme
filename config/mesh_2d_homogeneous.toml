@@ -1,0 +1,47 @@
+# Default Unstructured Mesh Configuration for SEAS-SEME
+#
+# This configuration generates a standard strike-slip fault mesh
+# suitable for earthquake cycle simulations.
+#
+# Usage:
+#   julia scripts/generate_mesh.jl config/mesh_default.toml simulation_name
+
+[domain]
+# Domain dimensions (meters)
+Lx = 40.0e3                    # Domain width (40 km)
+Ly = 40.0e3                    # Domain height (40 km)
+
+[fault]
+# Fault geometry (meters)
+start_y = 20.0e3               # Y-coordinate where fault begins (20 km)
+                               # Fault extends from start_y to Ly on right edge
+
+[meshing]
+# Element sizing (meters)
+background_grid_size = 2.0e3   # Default element size away from fault (2 km)
+fault_refinement_h = 2.0e3     # Target element size along fault (200 m)
+fault_refinement_width = 0.0e3 # Width of refinement zone around fault (2 km)
+
+# Spectral element configuration
+polynomial_order = 4           # Polynomial degree (p=4 means 5 nodes per element)
+
+# Mesh quality
+smoothing_iterations = 50      # Number of spring smoothing iterations
+
+[boundaries]
+# Boundary conditions defined in mesh
+# - fault: Right edge from start_y to Ly (earthquake nucleation zone)
+# - creep: Right edge from 0 to start_y (constant velocity plate loading)
+# - absorbing: Left edge and bottom edge (prevent wave reflections)
+# - free_surface: Top edge (stress-free boundary)
+
+[output]
+# Mesh file naming
+mesh_name = "unstructured"     # Base name for generated files
+                               # Generates: {mesh_name}.control, {mesh_name}.mesh, {mesh_name}.tec
+
+# Future extensions (not yet implemented):
+# [fault_zone]
+# enable = false
+# width = 1.0e3                # Width of low-velocity fault zone
+# velocity_reduction = 0.2     # Fraction of background velocity (e.g., 0.8 = 20% reduction)

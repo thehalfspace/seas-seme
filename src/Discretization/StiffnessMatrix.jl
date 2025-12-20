@@ -56,47 +56,51 @@ function elemental_stiffness_matrix(
     Wηη = zeros(T, nnodes, nnodes)
 
     # Compute weight matrices incorporating Jacobian and shear modulus
+    # Standard SEM form uses contravariant metric terms:
+    #   G = J^{-1} J^{-T}
+    # so weights are w_i w_j * μ * |J| * Gαβ
     for i in 1:nnodes, j in 1:nnodes
-        # Extract Jacobian components
-        δx_δξ = jac_matrix[1, 1, i, j]  # ∂x/∂ξ
-        δx_δη = jac_matrix[1, 2, i, j]  # ∂x/∂η
-        δy_δξ = jac_matrix[2, 1, i, j]  # ∂y/∂ξ
-        δy_δη = jac_matrix[2, 2, i, j]  # ∂y/∂η
+        # Jacobian entries: J = [x_ξ  x_η; y_ξ  y_η]
+        x_ξ = jac_matrix[1, 1, i, j]
+        x_η = jac_matrix[1, 2, i, j]
+        y_ξ = jac_matrix[2, 1, i, j]
+        y_η = jac_matrix[2, 2, i, j]
 
-        # Metric terms weighted by quadrature and material property
-        # These represent the inverse metric tensor components
-        denomξξ = δx_δξ * δx_δξ + δy_δξ * δy_δξ
-        denomξη = δx_δξ * δx_δη + δy_δξ * δy_δη
-        denomηξ = δx_δη * δx_δξ + δy_δη * δy_δξ
-        denomηη = δx_δη * δx_δη + δy_δη * δy_δη
+        detJ = jac_det[i, j]
 
-        # Check for division by zero and compute weights
-        if denomξξ != 0
-            Wξξ[i, j] = w2[i, j] * μ * jac_det[i, j] / denomξξ
+        # Hard fail on invalid geometry; don't "fix" by clamping/zeroing
+        if !isfinite(detJ) || abs(detJ) < 1e-18
+            error("Bad Jacobian determinant at (i=$i, j=$j): detJ=$detJ")
         end
-        if denomξη != 0
-            Wξη[i, j] = w2[i, j] * μ * jac_det[i, j] / denomξη
-        end
-        if denomηξ != 0
-            Wηξ[i, j] = w2[i, j] * μ * jac_det[i, j] / denomηξ
-        end
-        if denomηη != 0
-            Wηη[i, j] = w2[i, j] * μ * jac_det[i, j] / denomηη
+        if detJ < 0
+            @warn "Negative Jacobian determinant (orientation flip?)" detJ i j
+            # You can choose to use abs(detJ) instead if you want SPD no matter what:
+            # detJ = abs(detJ)
         end
 
-        # Safety check for NaN/Inf
-        if isnan(Wξξ[i, j]) || isinf(Wξξ[i, j])
-            Wξξ[i, j] = 0.0
-        end
-        if isnan(Wξη[i, j]) || isinf(Wξη[i, j])
-            Wξη[i, j] = 0.0
-        end
-        if isnan(Wηξ[i, j]) || isinf(Wηξ[i, j])
-            Wηξ[i, j] = 0.0
-        end
-        if isnan(Wηη[i, j]) || isinf(Wηη[i, j])
-            Wηη[i, j] = 0.0
-        end
+        inv_detJ = 1 / detJ
+
+        # Inverse Jacobian entries: [ξ_x  ξ_y; η_x  η_y] = J^{-1}
+        ξ_x =  y_η * inv_detJ
+        ξ_y = -x_η * inv_detJ
+        η_x = -y_ξ * inv_detJ
+        η_y =  x_ξ * inv_detJ
+
+        # Contravariant metric terms G = J^{-1} J^{-T}
+        g11 = ξ_x*ξ_x + ξ_y*ξ_y
+        g22 = η_x*η_x + η_y*η_y
+        g12 = ξ_x*η_x + ξ_y*η_y
+
+        wJμ = w2[i, j] * μ * detJ   # if detJ always > 0, this is fine
+        # If you decide to force SPD even with negative detJ, use:
+        # wJμ = w2[i, j] * μ * abs(detJ)
+
+        Wξξ[i, j] = wJμ * g11
+        Wηη[i, j] = wJμ * g22
+
+        # Force symmetry: Wξη must equal Wηξ
+        Wξη[i, j] = wJμ * g12
+        Wηξ[i, j] = Wξη[i, j]
     end
 
     # Assemble stiffness matrix using tensor product structure
@@ -173,6 +177,23 @@ function build_stiffness_matrices(
             mesh.jac_det[:, :, el],
             basis
         )
+    end
+
+    # Diagnostic: check for extreme values
+    K_max = maximum(abs.(K_el))
+    K_min = minimum(abs.(filter(!iszero, K_el)))
+    @info "Stiffness matrix stats" K_max K_min material_μ=material.μ
+    if K_max > 1e15 || K_min < 1e-10
+        @warn "Extreme stiffness matrix values detected - likely bad Jacobians!"
+        # Find which element has the problem
+        for el in 1:n_elements
+            K_el_max = maximum(abs.(K_el[:, :, el]))
+            if K_el_max > 1e15
+                jac_det_el = mesh.jac_det[:, :, el]
+                @warn "Element $el has extreme stiffness" K_el_max jac_det_min=minimum(jac_det_el) jac_det_max=maximum(jac_det_el)
+                break
+            end
+        end
     end
 
     return K_el
