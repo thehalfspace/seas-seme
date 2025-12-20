@@ -143,9 +143,14 @@ function dynamic_step!(state, solver::DynamicSolver{T}, mesh, physics, ics,
         # Store slip rate for second iteration
         Vf_first_iter[i] = Vf_prev[i]
 
+        # CRITICAL FIX: Convert perturbation stress → total stress for nr_search
+        # state.τf[i] stores τ_perturbation = τ_total - τ_init from previous timestep
+        # But nr_search expects τ_total as initial guess
+        τ_total_guess = state.τf[i] + ics.τo[i]
+
         # Newton-Raphson search (1st iteration)
         state.Vf[i], state.τf[i] = nr_search(
-            state.τf[i],           # Initial guess: previous stress
+            τ_total_guess,        # FIXED: Use total stress as initial guess
             params.fo,
             params.Vo,
             ics.friction.a[i],
@@ -170,8 +175,9 @@ function dynamic_step!(state, solver::DynamicSolver{T}, mesh, physics, ics,
                                          ics.friction.Lc[i], params.Vo)
 
         # Newton-Raphson search (2nd iteration)
+        # state.τf[i] already contains total stress from 1st iteration, no conversion needed
         state.Vf[i], state.τf[i] = nr_search(
-            state.τf[i],
+            state.τf[i],          # Already total stress from 1st iteration
             params.fo,
             params.Vo,
             ics.friction.a[i],
