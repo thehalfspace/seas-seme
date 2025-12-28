@@ -69,6 +69,13 @@ fault_slip = true                   # Output fault slip
 fault_stress = true                 # Output fault shear stress
 state_variable = true               # Output rate-state variable ψ
 
+# Full fault snapshot configuration (for slip contour plots)
+[output.snapshots]
+enabled = true                      # Enable full fault snapshots
+quasistatic_interval_years = 2.0    # Snapshot interval during interseismic (years)
+dynamic_interval = 0.1              # Snapshot interval during earthquakes (seconds)
+velocity_threshold = 1.0e-3         # Threshold to identify dynamic events (1 mm/s)
+
 [checkpointing]
 enabled = true                      # Enable checkpointing for restarts
 interval_years = 10.0                # Checkpoint every N years

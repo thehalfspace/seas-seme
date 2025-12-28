@@ -130,6 +130,11 @@ function run!(simulation)
                 write_timestep!(io_manager, state, mesh, ics, params)
             end
 
+            # Write snapshot if conditions are met
+            if should_write_snapshot(io_manager, state, config)
+                write_snapshot!(io_manager, state, mesh, ics, params, config)
+            end
+
             # Save checkpoint at specified intervals
             if should_save_checkpoint(state, config)
                 save_checkpoint!(simulation, config)

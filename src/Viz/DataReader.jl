@@ -262,3 +262,129 @@ function read_metadata(h5_file::String)
         return metadata
     end
 end
+
+
+"""
+    read_snapshots(h5_file::String) -> (times, slip, slip_rate, stress, state, depths_km)
+
+Read all snapshot data from HDF5 file.
+
+# Arguments
+- `h5_file::String`: Path to HDF5 output file
+
+# Returns
+- `times::Vector{Float64}`: Snapshot times [s]
+- `slip::Matrix{Float64}`: Cumulative slip [n_fault × n_snapshots] [m]
+- `slip_rate::Matrix{Float64}`: Slip rate [n_fault × n_snapshots] [m/s]
+- `stress::Matrix{Float64}`: Shear stress [n_fault × n_snapshots] [MPa]
+- `state::Matrix{Float64}`: State variable [n_fault × n_snapshots]
+- `depths_km::Vector{Float64}`: Fault depths [km]
+
+# Example
+```julia
+times, slip, slip_rate, stress, state, depths = read_snapshots("outputs/simulation.h5")
+# Plot slip contours
+contourf(times, depths, slip)
+```
+"""
+function read_snapshots(h5_file::String)
+    h5open(h5_file, "r") do file
+        # Check if snapshots exist
+        if !haskey(file, "snapshots")
+            error("No snapshots found in HDF5 file. Enable snapshots in config.")
+        end
+
+        snap_group = file["snapshots"]
+
+        # Read snapshot times
+        times = read(snap_group["times"])
+
+        # Read snapshot data matrices
+        slip = read(snap_group["slip"])
+        slip_rate = read(snap_group["slip_rate"])
+        stress = read(snap_group["shear_stress"])
+        state = read(snap_group["state_variable"])
+
+        # Read fault geometry
+        depths_km = read(file["mesh/fault_depths_km"])
+
+        return times, slip, slip_rate, stress, state, depths_km
+    end
+end
+
+
+"""
+    read_snapshot_at_index(h5_file::String, idx::Int) -> (time, slip, slip_rate, stress, state)
+
+Read a single snapshot at a specific index.
+
+# Arguments
+- `h5_file::String`: Path to HDF5 output file
+- `idx::Int`: Snapshot index (1-based)
+
+# Returns
+- `time::Float64`: Snapshot time [s]
+- `slip::Vector{Float64}`: Cumulative slip profile [m]
+- `slip_rate::Vector{Float64}`: Slip rate profile [m/s]
+- `stress::Vector{Float64}`: Shear stress profile [MPa]
+- `state::Vector{Float64}`: State variable profile
+
+# Example
+```julia
+t, slip, vf, tau, psi = read_snapshot_at_index("outputs/simulation.h5", 10)
+```
+"""
+function read_snapshot_at_index(h5_file::String, idx::Int)
+    h5open(h5_file, "r") do file
+        if !haskey(file, "snapshots")
+            error("No snapshots found in HDF5 file")
+        end
+
+        snap_group = file["snapshots"]
+
+        # Read data at index
+        time = read(snap_group["times"])[idx]
+        slip = read(snap_group["slip"])[:, idx]
+        slip_rate = read(snap_group["slip_rate"])[:, idx]
+        stress = read(snap_group["shear_stress"])[:, idx]
+        state = read(snap_group["state_variable"])[:, idx]
+
+        return time, slip, slip_rate, stress, state
+    end
+end
+
+
+"""
+    get_snapshot_config(h5_file::String) -> Dict{String, Any}
+
+Get snapshot configuration from HDF5 file attributes.
+
+# Arguments
+- `h5_file::String`: Path to HDF5 output file
+
+# Returns
+- `config::Dict{String, Any}`: Snapshot configuration parameters
+
+# Example
+```julia
+config = get_snapshot_config("outputs/simulation.h5")
+println("QS interval: ", config["quasistatic_interval"])
+```
+"""
+function get_snapshot_config(h5_file::String)
+    h5open(h5_file, "r") do file
+        if !haskey(file, "snapshots")
+            error("No snapshots found in HDF5 file")
+        end
+
+        snap_group = file["snapshots"]
+        attrs = attributes(snap_group)
+
+        config = Dict{String, Any}()
+        for key in keys(attrs)
+            config[key] = read(attrs[key])
+        end
+
+        return config
+    end
+end

@@ -64,7 +64,7 @@ finalize_output!(io_manager)
 
 # Module exports
 export HDF5OutputManager, create_io_manager
-export initialize_output!, write_timestep!, finalize_output!
+export initialize_output!, write_timestep!, write_snapshot!, should_write_snapshot, finalize_output!
 export save_checkpoint!, load_checkpoint, find_latest_checkpoint
 export setup_logging, close_logging, log_event
 export setup_simulation_directories, save_initial_parameters
