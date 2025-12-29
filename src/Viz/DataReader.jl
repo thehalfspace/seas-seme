@@ -185,7 +185,7 @@ function read_all_fault_timeseries(h5_file::String)
         for depth_str in depth_groups
             # Get fault index from attributes
             depth_group = ts_group[depth_str]
-            fault_idx = read(attributes(depth_group)["fault_index"])
+            fault_idx = read(HDF5.attributes(depth_group)["fault_index"])
 
             # Read slip rate
             slip_rate = read(depth_group["slip_rate"])
@@ -223,7 +223,7 @@ function get_available_depths(h5_file::String)
         depths = Float64[]
         for depth_str in depth_groups
             depth_group = ts_group[depth_str]
-            depth = read(attributes(depth_group)["depth_km"])
+            depth = read(HDF5.attributes(depth_group)["depth_km"])
             push!(depths, depth)
         end
 
@@ -252,7 +252,7 @@ println("Simulation: ", meta["simulation_name"])
 function read_metadata(h5_file::String)
     h5open(h5_file, "r") do file
         meta_group = file["metadata"]
-        attrs = attributes(meta_group)
+        attrs = HDF5.attributes(meta_group)
 
         metadata = Dict{String, Any}()
         for key in keys(attrs)
@@ -378,12 +378,12 @@ function get_snapshot_config(h5_file::String)
         end
 
         snap_group = file["snapshots"]
-        attrs = attributes(snap_group)
 
+        # Read attributes - use fully qualified name for module scope
         config = Dict{String, Any}()
-        for key in keys(attrs)
-            config[key] = read(attrs[key])
-        end
+        config["quasistatic_interval"] = read(HDF5.attributes(snap_group)["quasistatic_interval"])
+        config["dynamic_interval"] = read(HDF5.attributes(snap_group)["dynamic_interval"])
+        config["velocity_threshold"] = read(HDF5.attributes(snap_group)["velocity_threshold"])
 
         return config
     end
