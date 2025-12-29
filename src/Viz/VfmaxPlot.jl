@@ -43,7 +43,7 @@ function plot_vfmax(h5_file::String;
                    time_range=nothing,
                    vfmax_range=nothing)
     # Read data
-    times, Vfmax = read_timeseries_data(h5_file)
+    times, Vfmax, _ = read_timeseries_data(h5_file)
 
     # Convert time units
     yr2sec = 365.25 * 24 * 60 * 60
@@ -157,7 +157,7 @@ function plot_vfmax_comparison(h5_files::Vector{String}, labels::Vector{String};
     # Plot each simulation
     colors = [:blue, :red, :green, :purple, :orange, :cyan, :magenta, :brown]
     for (i, (file, label)) in enumerate(zip(h5_files, labels))
-        times, Vfmax = read_timeseries_data(file)
+        times, Vfmax, _ = read_timeseries_data(file)
         times = times .* time_conversion
 
         # Filter by time range if specified
@@ -215,7 +215,7 @@ function plot_vfmax_with_events(h5_file::String;
                                event_threshold=1e-3,
                                time_range=nothing)
     # Read data
-    times, Vfmax = read_timeseries_data(h5_file)
+    times, Vfmax, _ = read_timeseries_data(h5_file)
 
     # Convert time units
     yr2sec = 365.25 * 24 * 60 * 60

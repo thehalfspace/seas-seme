@@ -46,7 +46,7 @@ function plot_cumulative_slip(h5_file::String;
                              max_depth=nothing,
                              velocity_threshold=1e-3)
     # Read global time series to identify dynamic periods
-    times_global, Vfmax = read_timeseries_data(h5_file)
+    times_global, Vfmax, solver_mode = read_timeseries_data(h5_file)
 
     # Get available depths
     available_depths = get_available_depths(h5_file)
@@ -62,13 +62,23 @@ function plot_cumulative_slip(h5_file::String;
 
     yr2sec = 365.25 * 24 * 60 * 60
 
+    # Use solver_mode if available, otherwise fall back to velocity threshold
+    use_solver_mode = !isempty(solver_mode)
+
     # Identify sampling indices
     sampling_indices = Int[]
     last_dynamic_time = -Inf
     last_quasistatic_time = -Inf
 
-    for (i, (t, v)) in enumerate(zip(times_global, Vfmax))
-        if v >= velocity_threshold
+    for (i, t) in enumerate(times_global)
+        # Determine if dynamic based on solver_mode or velocity
+        is_dynamic = if use_solver_mode
+            solver_mode[i] == 1
+        else
+            Vfmax[i] >= velocity_threshold
+        end
+
+        if is_dynamic
             # Dynamic event
             if t - last_dynamic_time >= dynamic_interval
                 push!(sampling_indices, i)
@@ -102,8 +112,14 @@ function plot_cumulative_slip(h5_file::String;
             slip_profile[j] = slip[idx]
         end
 
-        # Determine color based on velocity
-        if Vfmax[idx] >= velocity_threshold
+        # Determine color based on solver_mode or velocity
+        is_dynamic = if use_solver_mode
+            solver_mode[idx] == 1
+        else
+            Vfmax[idx] >= velocity_threshold
+        end
+
+        if is_dynamic
             color = :chocolate  # Dynamic
             alpha = 0.5
             linewidth = 1.5
@@ -162,7 +178,7 @@ function plot_slip_at_times(h5_file::String, times::Vector{Float64};
     available_depths = get_available_depths(h5_file)
 
     # Read time vector
-    times_global, _ = read_timeseries_data(h5_file)
+    times_global, _, _ = read_timeseries_data(h5_file)
 
     # Convert requested times to seconds if needed
     yr2sec = 365.25 * 24 * 60 * 60

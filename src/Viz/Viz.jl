@@ -31,7 +31,7 @@ plot_cumulative_slip("data/strike_slip_benchmark/outputs/strike_slip_benchmark.h
 # Exported Functions
 
 ## Data Readers
-- `read_timeseries_data`: Read global time series (time, Vfmax)
+- `read_timeseries_data`: Read global time series (time, Vfmax, solver_mode)
 - `read_fault_geometry`: Read fault geometry
 - `read_depth_timeseries`: Read time series at specific depth
 - `read_initial_conditions`: Read friction parameters and stresses

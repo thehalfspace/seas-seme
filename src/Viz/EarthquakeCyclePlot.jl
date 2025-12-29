@@ -149,7 +149,7 @@ function plot_earthquake_cycle_with_vfmax(h5_file::String;
                                          vmax=1e0,
                                          colormap=:inferno)
     # Read data
-    times_global, Vfmax = read_timeseries_data(h5_file)
+    times_global, Vfmax, _ = read_timeseries_data(h5_file)
     times, slip_rate_matrix, depths_km = read_all_fault_timeseries(h5_file)
 
     # Convert to years

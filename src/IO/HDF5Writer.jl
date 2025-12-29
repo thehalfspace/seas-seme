@@ -210,9 +210,10 @@ function initialize_output!(io::HDF5OutputManager, mesh, config, ics)
     # === Time series datasets ===
     ts_group = create_group(file, "timeseries")
 
-    # Global maximum slip rate
+    # Global time series data
     create_extensible_dataset(ts_group, "time", Float64)
     create_extensible_dataset(ts_group, "max_slip_rate", Float64)
+    create_extensible_dataset(ts_group, "solver_mode", Int64)  # 0 = quasistatic, 1 = dynamic
 
     # === Snapshot datasets ===
     if config.output.snapshots.enabled
@@ -352,6 +353,10 @@ function write_timestep!(io::HDF5OutputManager, state, mesh, ics, params)
 
     Vf_max = maximum(abs.(state.Vf))
     extend_and_write!(file["timeseries/max_slip_rate"], idx, Vf_max)
+
+    # Save solver mode (0 = quasistatic, 1 = dynamic)
+    solver_mode_int = (state.solver_mode == :dynamic) ? 1 : 0
+    extend_and_write!(file["timeseries/solver_mode"], idx, solver_mode_int)
 
     # === Per-location time series ===
     for (i, fault_idx) in enumerate(io.output_indices)

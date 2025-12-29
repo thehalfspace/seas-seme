@@ -9,7 +9,7 @@ using DelimitedFiles
 
 
 """
-    read_timeseries_data(h5_file::String) -> (times, Vfmax)
+    read_timeseries_data(h5_file::String) -> (times, Vfmax, solver_mode)
 
 Read global time series data from HDF5 output file.
 
@@ -19,17 +19,26 @@ Read global time series data from HDF5 output file.
 # Returns
 - `times::Vector`: Simulation times [s]
 - `Vfmax::Vector`: Maximum fault slip rate at each timestep [m/s]
+- `solver_mode::Vector{Int}`: Solver mode at each timestep (0 = quasistatic, 1 = dynamic)
 
 # Example
 ```julia
-times, Vfmax = read_timeseries_data("outputs/simulation.h5")
+times, Vfmax, solver_mode = read_timeseries_data("outputs/simulation.h5")
 ```
 """
 function read_timeseries_data(h5_file::String)
     h5open(h5_file, "r") do file
         times = read(file, "timeseries/time")
         Vfmax = read(file, "timeseries/max_slip_rate")
-        return times, Vfmax
+
+        # Try to read solver_mode (may not exist in older files)
+        solver_mode = if haskey(file["timeseries"], "solver_mode")
+            read(file, "timeseries/solver_mode")
+        else
+            Int[]  # Return empty if not available
+        end
+
+        return times, Vfmax, solver_mode
     end
 end
 
