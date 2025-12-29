@@ -26,6 +26,9 @@ Manager for HDF5 output during simulation.
 - `depths::Vector{Float64}`: Fault depths for output locations [km]
 - `current_index::Int`: Current write index in datasets
 - `write_interval::Int`: Write every N iterations
+- `snapshot_index::Int`: Current snapshot write index
+- `last_snapshot_time::Float64`: Time of last snapshot write
+- `in_dynamic_event::Bool`: Track if currently in dynamic event
 """
 mutable struct HDF5OutputManager
     file::HDF5.File
@@ -33,6 +36,9 @@ mutable struct HDF5OutputManager
     depths::Vector{Float64}
     current_index::Int
     write_interval::Int
+    snapshot_index::Int
+    last_snapshot_time::Float64
+    in_dynamic_event::Bool
 end
 
 
@@ -111,7 +117,7 @@ function create_io_manager(config::SimulationConfig, mesh)
 
     @info "HDF5 output initialized" filepath=filepath n_locations=length(output_indices)
 
-    return HDF5OutputManager(file, output_indices, output_depths, 0, 1)
+    return HDF5OutputManager(file, output_indices, output_depths, 0, 1, 0, -Inf, false)
 end
 
 
@@ -208,6 +214,31 @@ function initialize_output!(io::HDF5OutputManager, mesh, config, ics)
     create_extensible_dataset(ts_group, "time", Float64)
     create_extensible_dataset(ts_group, "max_slip_rate", Float64)
 
+    # === Snapshot datasets ===
+    if config.output.snapshots.enabled
+        snap_group = create_group(file, "snapshots")
+
+        # Store snapshot configuration as attributes
+        attributes(snap_group)["quasistatic_interval"] = config.output.snapshots.quasistatic_interval
+        attributes(snap_group)["dynamic_interval"] = config.output.snapshots.dynamic_interval
+        attributes(snap_group)["velocity_threshold"] = config.output.snapshots.velocity_threshold
+
+        # Get number of fault nodes
+        n_fault = size(mesh.boundaries.fault.coords, 2)
+
+        # Create extensible 1D arrays for snapshot times
+        create_extensible_dataset(snap_group, "times", Float64)
+
+        # Create 2D extensible datasets for full fault profiles
+        # Each column is a snapshot, each row is a fault node
+        create_extensible_2d_dataset(snap_group, "slip", Float64, n_fault)
+        create_extensible_2d_dataset(snap_group, "slip_rate", Float64, n_fault)
+        create_extensible_2d_dataset(snap_group, "shear_stress", Float64, n_fault)
+        create_extensible_2d_dataset(snap_group, "state_variable", Float64, n_fault)
+
+        @info "Snapshot datasets initialized" n_fault_nodes=n_fault
+    end
+
     # Per-location time series
     for (i, depth) in enumerate(io.depths)
         depth_str = @sprintf("depth_%.1fkm", depth)
@@ -260,6 +291,34 @@ function create_extensible_dataset(parent, name::String, dtype::Type;
     dset = create_dataset(parent, name, dtype,
                          ((0,), (-1,)),  # Initial size 0, unlimited max
                          chunk=(chunk_size,),
+                         deflate=4)  # GZIP compression level 4
+
+    return dset
+end
+
+
+"""
+    create_extensible_2d_dataset(parent, name, dtype, n_rows; chunk_size=100)
+
+Create extensible 2D dataset with compression for snapshot data.
+
+# Arguments
+- `parent`: HDF5 group
+- `name::String`: Dataset name
+- `dtype::Type`: Data type
+- `n_rows::Int`: Fixed number of rows (fault nodes)
+- `chunk_size::Int`: Chunk size for columns (default: 100)
+
+# Returns
+- `HDF5.Dataset`: Extensible 2D dataset
+"""
+function create_extensible_2d_dataset(parent, name::String, dtype::Type,
+                                      n_rows::Int; chunk_size::Int=100)
+    # Create 2D extensible dataset (rows=fault nodes, cols=snapshots)
+    # Initial size: (n_rows, 0), max size: (n_rows, unlimited)
+    dset = create_dataset(parent, name, dtype,
+                         ((n_rows, 0), (n_rows, -1)),
+                         chunk=(n_rows, chunk_size),
                          deflate=4)  # GZIP compression level 4
 
     return dset
@@ -343,6 +402,133 @@ end
 
 
 """
+    write_snapshot!(io::HDF5OutputManager, state, mesh, ics, params, config)
+
+Write full fault snapshot at current time.
+
+# Arguments
+- `io::HDF5OutputManager`: Output manager
+- `state::SimulationState`: Current state
+- `mesh`: Mesh with boundary info
+- `ics`: Initial conditions
+- `params`: Simulation parameters
+- `config`: Simulation configuration
+
+# Notes
+Appends a new column to the 2D snapshot datasets.
+"""
+function write_snapshot!(io::HDF5OutputManager, state, mesh, ics, params, config)
+    if !config.output.snapshots.enabled
+        return nothing
+    end
+
+    file = io.file
+    io.snapshot_index += 1
+    snap_idx = io.snapshot_index
+
+    fault_id = mesh.boundaries.fault.node_ids
+    n_fault = length(fault_id)
+
+    # Compute full fault quantities
+    slip = 2 * state.u[fault_id] .+ params.Vpl * state.time
+    slip_rate = state.Vf
+    shear_stress = (state.τf .+ ics.τo) ./ 1e6  # MPa
+    state_var = state.ψ
+
+    # Write snapshot time
+    extend_and_write!(file["snapshots/times"], snap_idx, state.time)
+
+    # Write 2D snapshot data (extend by one column)
+    extend_and_write_2d!(file["snapshots/slip"], snap_idx, slip)
+    extend_and_write_2d!(file["snapshots/slip_rate"], snap_idx, slip_rate)
+    extend_and_write_2d!(file["snapshots/shear_stress"], snap_idx, shear_stress)
+    extend_and_write_2d!(file["snapshots/state_variable"], snap_idx, state_var)
+
+    # Periodic flush
+    if mod(snap_idx, 10) == 0
+        flush(file)
+    end
+
+    return nothing
+end
+
+
+"""
+    extend_and_write_2d!(dset::HDF5.Dataset, col_index::Int, values::Vector)
+
+Extend 2D dataset by one column and write values.
+
+# Arguments
+- `dset::HDF5.Dataset`: 2D dataset to write to
+- `col_index::Int`: Column index to write (1-based)
+- `values::Vector`: Column values to write
+"""
+function extend_and_write_2d!(dset::HDF5.Dataset, col_index::Int, values::Vector)
+    # Get current dimensions
+    n_rows = size(dset, 1)
+
+    # Extend dataset to accommodate new column
+    HDF5.set_extent_dims(dset, (n_rows, col_index))
+
+    # Write column
+    dset[:, col_index] = values
+
+    return nothing
+end
+
+
+"""
+    should_write_snapshot(io::HDF5OutputManager, state, config) -> Bool
+
+Determine if snapshot should be written based on time intervals and solver mode.
+
+# Arguments
+- `io::HDF5OutputManager`: Output manager with last snapshot time
+- `state`: Simulation state with current time and slip rates
+- `config`: Configuration with snapshot intervals
+
+# Returns
+- `Bool`: True if snapshot should be written
+"""
+function should_write_snapshot(io::HDF5OutputManager, state, config)
+    if !config.output.snapshots.enabled
+        return false
+    end
+
+    snap_config = config.output.snapshots
+    current_time = state.time
+    Vf_max = maximum(abs.(state.Vf))
+
+    # Check if in dynamic event
+    is_dynamic = Vf_max >= snap_config.velocity_threshold
+
+    # Update event state
+    if is_dynamic && !io.in_dynamic_event
+        # Entering dynamic event - write snapshot immediately
+        io.in_dynamic_event = true
+        io.last_snapshot_time = current_time
+        return true
+    elseif !is_dynamic && io.in_dynamic_event
+        # Exiting dynamic event
+        io.in_dynamic_event = false
+    end
+
+    # Determine appropriate interval
+    interval = is_dynamic ? snap_config.dynamic_interval : snap_config.quasistatic_interval
+
+    # Check if enough time has passed
+    time_since_last = current_time - io.last_snapshot_time
+
+    if time_since_last >= interval
+        io.last_snapshot_time = current_time
+        return true
+    end
+
+    return false
+end
+
+
+"""
     finalize_output!(io::HDF5OutputManager)
 
 Finalize output and close HDF5 file.
@@ -351,7 +537,7 @@ function finalize_output!(io::HDF5OutputManager)
     flush(io.file)
     close(io.file)
 
-    @info "HDF5 output finalized" total_writes=io.current_index
+    @info "HDF5 output finalized" total_writes=io.current_index total_snapshots=io.snapshot_index
 
     return nothing
 end

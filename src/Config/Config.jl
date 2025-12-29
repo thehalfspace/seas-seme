@@ -163,13 +163,40 @@ function parse_output_config(dict::Dict, yr2sec::Float64)::OutputConfig
         dict["fields"]["state_variable"]
     )
 
-    # Convert snapshot interval from years to seconds if specified in years
+    # Convert snapshot interval from years to seconds if specified in years (backward compatibility)
     snapshot_interval = if haskey(dict, "snapshot_interval_years")
         dict["snapshot_interval_years"] * yr2sec
     elseif haskey(dict, "snapshot_interval")
         dict["snapshot_interval"]
     else
-        error("Must specify either snapshot_interval or snapshot_interval_years in [output]")
+        1.0 * yr2sec  # Default to 1 year
+    end
+
+    # Parse snapshots configuration
+    snapshots_config = if haskey(dict, "snapshots")
+        snap_dict = dict["snapshots"]
+
+        # Convert intervals
+        qs_interval = if haskey(snap_dict, "quasistatic_interval_years")
+            snap_dict["quasistatic_interval_years"] * yr2sec
+        elseif haskey(snap_dict, "quasistatic_interval")
+            snap_dict["quasistatic_interval"]
+        else
+            2.0 * yr2sec  # Default to 2 years
+        end
+
+        dyn_interval = get(snap_dict, "dynamic_interval", 0.1)  # Default to 0.1 seconds
+        velocity_threshold = get(snap_dict, "velocity_threshold", 1e-3)  # Default to 1 mm/s
+
+        SnapshotConfig(
+            get(snap_dict, "enabled", true),
+            qs_interval,
+            dyn_interval,
+            velocity_threshold
+        )
+    else
+        # Default snapshot configuration
+        SnapshotConfig(true, 2.0 * yr2sec, 0.1, 1e-3)
     end
 
     return OutputConfig(
@@ -177,7 +204,8 @@ function parse_output_config(dict::Dict, yr2sec::Float64)::OutputConfig
         dict["timeseries_depths"],
         snapshot_interval,
         dict["log_interval"],
-        fields_config
+        fields_config,
+        snapshots_config
     )
 end
 
@@ -248,6 +276,16 @@ function validate_config(config::SimulationConfig)
     length(config.output.timeseries_depths) > 0 || error("Must specify at least one timeseries depth")
     config.output.snapshot_interval > 0 || error("snapshot_interval must be positive")
     config.output.log_interval > 0 || error("log_interval must be positive")
+
+    # Snapshot validation
+    if config.output.snapshots.enabled
+        config.output.snapshots.quasistatic_interval > 0 ||
+            error("quasistatic_interval must be positive")
+        config.output.snapshots.dynamic_interval > 0 ||
+            error("dynamic_interval must be positive")
+        config.output.snapshots.velocity_threshold > 0 ||
+            error("velocity_threshold must be positive")
+    end
 
     # Checkpointing validation
     if config.checkpointing.enabled

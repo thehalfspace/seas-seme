@@ -161,6 +161,9 @@ function nr_search(τ_guess::T, f₀::T, V₀::T, a::T, b::T, σ_n::T,
     # Convergence tolerance
     tol = tol_factor * a * σ_n
 
+    # Maximum safe exponential argument (exp(700) ≈ 1e304 for Float64)
+    max_exp_arg = T(700)
+
     # Initialize
     τ = τ_guess
     δ = typemax(T)  # Large initial value
@@ -172,8 +175,12 @@ function nr_search(τ_guess::T, f₀::T, V₀::T, a::T, b::T, σ_n::T,
         fa = fact * τ / (σ_n * a)
         help = -(f₀ + b * ψ) / a
 
-        help1 = exp(help + fa)
-        help2 = exp(help - fa)
+        # CRITICAL FIX: Clamp exponential arguments to prevent overflow → NaN
+        arg_plus = clamp(help + fa, -max_exp_arg, max_exp_arg)
+        arg_minus = clamp(help - fa, -max_exp_arg, max_exp_arg)
+
+        help1 = exp(arg_plus)
+        help2 = exp(arg_minus)
 
         V = V₀ * (help1 - help2)
         V_prime = fact * (V₀ / (a * σ_n)) * (help1 + help2)
@@ -185,24 +192,28 @@ function nr_search(τ_guess::T, f₀::T, V₀::T, a::T, b::T, σ_n::T,
 
         iter += 1
 
-        # Check for divergence
-        if abs(δ) > 1e10 || iter >= max_iter
-            @warn "NR search failed to converge" iter δ tol
-            # Recompute final slip rate
+        # Check for divergence or NaN
+        if !isfinite(τ) || !isfinite(δ) || abs(δ) > 1e10 || iter >= max_iter
+            @warn "NR search failed to converge" iter δ tol τ V σ_n a b ψ fault_z fault_vfree
+            # Recompute final slip rate with clamping
             fa = fact * τ / (σ_n * a)
             help = -(f₀ + b * ψ) / a
-            help1 = exp(help + fa)
-            help2 = exp(help - fa)
+            arg_plus = clamp(help + fa, -max_exp_arg, max_exp_arg)
+            arg_minus = clamp(help - fa, -max_exp_arg, max_exp_arg)
+            help1 = exp(arg_plus)
+            help2 = exp(arg_minus)
             V = V₀ * (help1 - help2)
             return V, τ
         end
     end
 
-    # Recompute final slip rate with converged stress
+    # Recompute final slip rate with converged stress (with clamping for safety)
     fa = fact * τ / (σ_n * a)
     help = -(f₀ + b * ψ) / a
-    help1 = exp(help + fa)
-    help2 = exp(help - fa)
+    arg_plus = clamp(help + fa, -max_exp_arg, max_exp_arg)
+    arg_minus = clamp(help - fa, -max_exp_arg, max_exp_arg)
+    help1 = exp(arg_plus)
+    help2 = exp(arg_minus)
     V = V₀ * (help1 - help2)
 
     return V, τ

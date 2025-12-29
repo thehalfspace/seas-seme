@@ -153,6 +153,24 @@ struct SolverConfig
 end
 
 """
+    SnapshotConfig
+
+Configuration for full fault snapshots at intervals.
+
+# Fields
+- `enabled::Bool`: Enable/disable snapshot output
+- `quasistatic_interval::Float64`: Time interval during quasistatic periods (seconds)
+- `dynamic_interval::Float64`: Time interval during dynamic events (seconds)
+- `velocity_threshold::Float64`: Slip rate threshold to identify dynamic events (m/s)
+"""
+struct SnapshotConfig
+    enabled::Bool
+    quasistatic_interval::Float64
+    dynamic_interval::Float64
+    velocity_threshold::Float64
+end
+
+"""
     OutputConfig
 
 Output configuration (HDF5, time series, snapshots).
@@ -160,16 +178,18 @@ Output configuration (HDF5, time series, snapshots).
 # Fields
 - `format::String`: Output format ("hdf5")
 - `timeseries_depths::Vector{Float64}`: Depths (km) for time series output
-- `snapshot_interval::Float64`: Time interval for full-field snapshots (seconds)
+- `snapshot_interval::Float64`: Time interval for full-field snapshots (seconds) [DEPRECATED - use snapshots config]
 - `log_interval::Int`: Iteration interval for console logging
 - `fields::OutputFieldsConfig`: Which fields to output
+- `snapshots::SnapshotConfig`: Configuration for full fault snapshots
 """
 struct OutputConfig
     format::String
     timeseries_depths::Vector{Float64}
-    snapshot_interval::Float64
+    snapshot_interval::Float64  # Keep for backward compatibility
     log_interval::Int
     fields::OutputFieldsConfig
+    snapshots::SnapshotConfig
 end
 
 # ============================================================================

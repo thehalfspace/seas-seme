@@ -38,6 +38,9 @@ plot_cumulative_slip("data/strike_slip_benchmark/outputs/strike_slip_benchmark.h
 - `read_all_fault_timeseries`: Read slip rate matrix for heatmaps
 - `get_available_depths`: Get list of available depths
 - `read_metadata`: Read simulation metadata
+- `read_snapshots`: Read all snapshot data (slip, slip rate, stress, state)
+- `read_snapshot_at_index`: Read single snapshot at specific index
+- `get_snapshot_config`: Get snapshot configuration from file
 
 ## Parameter Plots
 - `plot_initial_conditions`: Plot friction + stress with dual axes
@@ -60,6 +63,12 @@ plot_cumulative_slip("data/strike_slip_benchmark/outputs/strike_slip_benchmark.h
 - `plot_slip_at_times`: Slip profiles at specified times
 - `plot_slip_evolution`: Cumulative slip vs time at specific depth
 - `plot_slip_deficit`: Slip deficit (plate motion - slip) vs time
+
+## Slip Contour Plots (from Snapshots)
+- `plot_slip_contours`: Contour plot of cumulative slip (depth vs time)
+- `plot_slip_rate_contours`: Contour plot of slip rate (depth vs time)
+- `plot_stress_contours`: Contour plot of shear stress (depth vs time)
+- `plot_all_contours`: Generate all contour plots in one call
 """
 module Viz
 
@@ -74,6 +83,7 @@ include("ParametersPlot.jl")
 include("VfmaxPlot.jl")
 include("EarthquakeCyclePlot.jl")
 include("CumulativeSlipPlot.jl")
+include("SlipContoursPlot.jl")
 
 # Export data reading functions
 export read_timeseries_data
@@ -83,6 +93,9 @@ export read_initial_conditions
 export read_all_fault_timeseries
 export get_available_depths
 export read_metadata
+export read_snapshots
+export read_snapshot_at_index
+export get_snapshot_config
 
 # Export parameter plotting functions
 export plot_initial_conditions
@@ -105,5 +118,11 @@ export plot_cumulative_slip
 export plot_slip_at_times
 export plot_slip_evolution
 export plot_slip_deficit
+
+# Export slip contour plotting functions
+export plot_slip_contours
+export plot_slip_rate_contours
+export plot_stress_contours
+export plot_all_contours
 
 end  # module Viz

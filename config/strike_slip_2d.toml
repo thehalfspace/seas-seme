@@ -13,7 +13,8 @@ total_time_years = 100.0             # Total simulation time in years
 output_dir = "./data"               # Base output directory (simulation folder created inside)
 
 [mesh]
-file = "./data/mesh/unstructured/unstructured.mesh"     # HOHQMesh mesh file
+file = "./data/mesh/amr/unstructured_amr.mesh"     # HOHQMesh mesh file
+#file = "./data/mesh/unstructured/unstructured.mesh"     # HOHQMesh mesh file
 polynomial_degree = 4               # Spectral element polynomial degree (p=4)
 
 [physics]
@@ -67,6 +68,13 @@ velocity = true                     # Output velocity field
 fault_slip = true                   # Output fault slip
 fault_stress = true                 # Output fault shear stress
 state_variable = true               # Output rate-state variable ψ
+
+# Full fault snapshot configuration (for slip contour plots)
+[output.snapshots]
+enabled = true                      # Enable full fault snapshots
+quasistatic_interval_years = 2.0    # Snapshot interval during interseismic (years)
+dynamic_interval = 0.1              # Snapshot interval during earthquakes (seconds)
+velocity_threshold = 1.0e-3         # Threshold to identify dynamic events (1 mm/s)
 
 [checkpointing]
 enabled = true                      # Enable checkpointing for restarts
