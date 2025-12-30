@@ -8,13 +8,13 @@ yr2sec = 31557600.0                 # Seconds per year (365.25 * 24 * 3600)
 day2sec = 86400.0                   # Seconds per day (24 * 3600)
 
 [simulation]
-name = "strike_slip_2d"
-total_time_years = 100.0             # Total simulation time in years
+name = "strike_slip_2d_highres"
+total_time_years = 400.0             # Total simulation time in years
 output_dir = "./data"               # Base output directory (simulation folder created inside)
 
 [mesh]
-file = "./data/mesh/amr/unstructured_amr.mesh"     # HOHQMesh mesh file
-#file = "./data/mesh/unstructured/unstructured.mesh"     # HOHQMesh mesh file
+file = "./data/mesh/homogeneous/homogeneous.mesh"     # HOHQMesh mesh file
+#file = "./data/mesh/amr/unstructured_amr.mesh"     # HOHQMesh mesh file
 polynomial_degree = 4               # Spectral element polynomial degree (p=4)
 
 [physics]
@@ -78,5 +78,5 @@ velocity_threshold = 1.0e-3         # Threshold to identify dynamic events (1 mm
 
 [checkpointing]
 enabled = true                      # Enable checkpointing for restarts
-interval_years = 10.0                # Checkpoint every N years
+interval_years = 100.0                # Checkpoint every N years
 keep_last = 5                       # Keep only the last N checkpoints

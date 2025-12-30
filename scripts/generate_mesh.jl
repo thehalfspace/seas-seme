@@ -8,7 +8,7 @@ simulations using HOHQMesh.jl.
 
 ## From configuration file (recommended):
 ```bash
-julia scripts/generate_mesh.jl config/mesh_default.toml simulation_name
+julia scripts/generate_mesh.jl config/mesh_default.toml
 ```
 
 ## From command line with custom parameters:
@@ -22,7 +22,7 @@ Positional:
 - `config_or_name`: Either a .toml config file path OR simulation name
 
 When using config file:
-- `simulation_name`: Name of simulation (creates data/mesh/{simulation_name}/)
+- `simulation_name`: Optional display name (if not provided, uses directory name from config)
 
 When using simulation name directly, optional arguments:
 - `--Lx`: Domain width in meters (default: 40e3)
@@ -38,7 +38,7 @@ When using simulation name directly, optional arguments:
 
 ## Using configuration file:
 ```bash
-julia scripts/generate_mesh.jl config/mesh_default.toml strike_slip_benchmark
+julia scripts/generate_mesh.jl config/mesh_default.toml
 ```
 
 ## Using command line (for quick tests):
@@ -48,15 +48,15 @@ julia scripts/generate_mesh.jl test_mesh --refine 0.1e3
 
 # Output
 
-Creates directory `data/mesh/{simulation_name}/` containing:
-- `unstructured.control`: HOHQMesh control file
-- `unstructured.mesh`: Binary mesh file (use in config.toml)
-- `unstructured.tec`: Tecplot file (visualize in ParaView)
+Creates mesh files in the directory specified by `output_dir` in the config:
+- `{mesh_name}.control`: HOHQMesh control file
+- `{mesh_name}.mesh`: Binary mesh file (use in config.toml)
+- `{mesh_name}.tec`: Tecplot file (visualize in ParaView)
 
 The mesh file path should be referenced in your simulation config.toml:
 ```toml
 [mesh]
-file = "data/mesh/{simulation_name}/unstructured.mesh"
+file = "data/mesh/homogeneous/unstructured_02.mesh"
 polynomial_degree = 4
 ```
 """
@@ -73,7 +73,7 @@ function parse_commandline()
         description = "Generate unstructured mesh for SEAS-SEME earthquake cycle simulation",
         epilog = """
         Examples:
-            julia scripts/generate_mesh.jl config/mesh_default.toml my_simulation
+            julia scripts/generate_mesh.jl config/mesh_default.toml
             julia scripts/generate_mesh.jl test_mesh --refine 0.1e3
         """
     )
@@ -151,7 +151,12 @@ function load_mesh_params_from_toml(config_file::String)
             polynomial_order = config["meshing"]["polynomial_order"],
             smoothing_iterations = config["meshing"]["smoothing_iterations"]
         )
-        return params, get(get(config, "output", Dict()), "mesh_name", "unstructured")
+
+        output_config = get(config, "output", Dict())
+        mesh_name = get(output_config, "mesh_name", "unstructured")
+        output_dir = get(output_config, "output_dir", "data/mesh")
+
+        return params, mesh_name, output_dir
     catch e
         error("Error parsing config file $config_file: $e")
     end
@@ -168,15 +173,17 @@ function main()
 
     if using_config
         # Config file mode
-        if isnothing(args["simulation_name"])
-            error("When using config file, you must provide simulation_name as second argument")
-        end
-
-        simulation_name = args["simulation_name"]
         config_file = config_or_name
 
         println("Loading mesh configuration from: $config_file")
-        params, mesh_name = load_mesh_params_from_toml(config_file)
+        params, mesh_name, output_dir = load_mesh_params_from_toml(config_file)
+
+        # Simulation name is optional now (used only for display)
+        simulation_name = if !isnothing(args["simulation_name"])
+            args["simulation_name"]
+        else
+            basename(output_dir)  # Use directory name as simulation name
+        end
 
     else
         # Direct parameters mode
@@ -193,9 +200,10 @@ function main()
             polynomial_order = args["order"],
             smoothing_iterations = args["smooth"]
         )
-    end
 
-    output_dir = joinpath("data", "mesh", simulation_name)
+        # Use default output directory for direct mode
+        output_dir = joinpath("data", "mesh", simulation_name)
+    end
 
     # Print configuration
     println("━"^70)
