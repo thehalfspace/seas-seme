@@ -204,3 +204,134 @@ function stiffness_assembly(K_el::Array{T,3}, dof_id::Array{Int,3}) where {T}
     # Construct sparse matrix (sum duplicates with '+' combiner)
     return sparse(I, J, V, ndof, ndof, +)
 end
+
+
+# ============================================================================
+# Plane-strain matrix-free operator
+# ============================================================================
+
+"""
+    apply_stiffness_plane_strain!(y, x, K_el, dof_id, n_elements, ndof)
+
+Apply plane-strain stiffness operator y = K*x using element-by-element operations.
+
+The global vectors x, y have length 2*ndof in component-major order:
+[u_x(1..ndof), u_y(1..ndof)].
+
+Elemental stiffness K_el has size [2*N, 2*N, n_elements] where N = nnodes².
+The local vector for each element is [x_local_x; x_local_y] of length 2*N.
+"""
+function apply_stiffness_plane_strain!(
+    y::Vector{T},
+    x::Vector{T},
+    K_el::Array{T,3},
+    dof_id::Array{Int,3},
+    n_elements::Int,
+    ndof::Int
+) where {T<:AbstractFloat}
+    fill!(y, zero(T))
+
+    nnodes_sq = size(dof_id, 1) * size(dof_id, 2)
+
+    for el in 1:n_elements
+        local_idx = dof_id[:, :, el]  # Spatial DOF indices
+        idx_flat = local_idx[:]       # Flattened to vector of length N
+
+        # Gather local vector: [x_x; x_y] of length 2N
+        x_local = zeros(T, 2 * nnodes_sq)
+        x_local[1:nnodes_sq] = x[idx_flat]
+        x_local[nnodes_sq+1:2*nnodes_sq] = x[ndof .+ idx_flat]
+
+        # Local matrix-vector product
+        y_local = K_el[:, :, el] * x_local
+
+        # Scatter-add into global vector
+        y_x_local = reshape(y_local[1:nnodes_sq], size(local_idx))
+        y_y_local = reshape(y_local[nnodes_sq+1:2*nnodes_sq], size(local_idx))
+
+        y[local_idx] .+= y_x_local
+        y[ndof .+ local_idx] .+= y_y_local
+    end
+
+    return y
+end
+
+"""
+    StiffnessOperatorPlaneStrain{T} <: AbstractMatrix{T}
+
+Matrix-free stiffness operator for plane-strain formulation.
+
+Operates on 2*ndof vectors in component-major order: [u_x(1..ndof), u_y(1..ndof)].
+The `fltni` indices are in the 2*ndof space.
+"""
+struct StiffnessOperatorPlaneStrain{T<:AbstractFloat} <: AbstractMatrix{T}
+    K_el::Array{T,3}          # [2*N, 2*N, n_elements]
+    dof_id::Array{Int,3}      # [nnodes, nnodes, n_elements] (spatial DOFs)
+    n_elements::Int
+    ndof::Int                  # spatial DOFs
+    fltni::Vector{Int}         # free DOF indices in 2*ndof space
+    x_full::Vector{T}         # workspace [2*ndof]
+    y_full::Vector{T}         # workspace [2*ndof]
+end
+
+function StiffnessOperatorPlaneStrain(
+    K_el::Array{T,3},
+    dof_id::Array{Int,3},
+    n_elements::Int,
+    ndof::Int,
+    fltni::Vector{Int}
+) where {T<:AbstractFloat}
+    x_full = zeros(T, 2 * ndof)
+    y_full = zeros(T, 2 * ndof)
+    return StiffnessOperatorPlaneStrain(K_el, dof_id, n_elements, ndof, fltni, x_full, y_full)
+end
+
+function LinearAlgebra.mul!(y::Vector, A::StiffnessOperatorPlaneStrain{T}, x::Vector) where {T}
+    fill!(A.x_full, zero(T))
+    A.x_full[A.fltni] .= x
+
+    apply_stiffness_plane_strain!(A.y_full, A.x_full, A.K_el, A.dof_id,
+                                  A.n_elements, A.ndof)
+
+    y .= A.y_full[A.fltni]
+    return y
+end
+
+Base.size(A::StiffnessOperatorPlaneStrain) = (length(A.fltni), length(A.fltni))
+Base.size(A::StiffnessOperatorPlaneStrain, d::Int) = size(A)[d]
+Base.eltype(A::StiffnessOperatorPlaneStrain{T}) where {T} = T
+
+"""
+    stiffness_assembly_plane_strain(K_el, dof_id, ndof) -> SparseMatrixCSC
+
+Assemble global sparse stiffness matrix for plane-strain (2*ndof × 2*ndof).
+
+Used for building the AMG preconditioner.
+"""
+function stiffness_assembly_plane_strain(K_el::Array{T,3}, dof_id::Array{Int,3}, ndof::Int) where {T}
+    Nel = size(dof_id, 3)
+    nnodes_sq = size(dof_id, 1) * size(dof_id, 2)
+
+    # Count total triplets: each element contributes (2*N)^2 entries
+    total_entries = Nel * (2 * nnodes_sq)^2
+    II = Vector{Int}(undef, total_entries)
+    JJ = Vector{Int}(undef, total_entries)
+    VV = Vector{T}(undef, total_entries)
+
+    ct = 1
+    for el in 1:Nel
+        idx_spatial = dof_id[:, :, el][:]  # Spatial DOF indices, length N
+
+        # Build global index mapping for this element: [idx_x; idx_y]
+        global_idx = vcat(idx_spatial, ndof .+ idx_spatial)  # length 2N
+
+        for j in 1:2*nnodes_sq, i in 1:2*nnodes_sq
+            II[ct] = global_idx[i]
+            JJ[ct] = global_idx[j]
+            VV[ct] = K_el[i, j, el]
+            ct += 1
+        end
+    end
+
+    return sparse(II, JJ, VV, 2 * ndof, 2 * ndof, +)
+end

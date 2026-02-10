@@ -1,0 +1,75 @@
+# SEAS-SEME Configuration: 2D Plane-Strain Earthquake Cycle Simulation
+#
+# Same benchmark geometry as strike_slip_2d.toml but using plane-strain
+# formulation with P-SV waves (2 displacement components).
+
+[constants]
+yr2sec = 31557600.0                 # Seconds per year (365.25 * 24 * 3600)
+day2sec = 86400.0                   # Seconds per day (24 * 3600)
+
+[simulation]
+name = "plane_strain_2d"
+total_time_years = 400.0             # Total simulation time in years
+output_dir = "./data"               # Base output directory
+
+[mesh]
+file = "./data/mesh/homogeneous/homogeneous.mesh"
+polynomial_degree = 4               # Spectral element polynomial degree (p=4)
+
+[physics]
+# Deformation formulation: plane_strain gives 2-component (u_x, u_y) displacement
+formulation = "plane_strain"
+dip_angle = 90.0                    # Fault dip angle in degrees (90 = vertical)
+poisson_ratio = 0.25                # Poisson's ratio ν
+
+# Material properties
+density = 2670.0                    # Density (kg/m³)
+shear_velocity = 3464.0             # Shear wave velocity (m/s)
+# Derived: P-wave velocity ≈ 6000 m/s, Shear modulus ≈ 32 GPa
+
+# Plate loading and friction
+plate_velocity = 1.11e-9            # 35 mm/yr in m/s
+reference_friction = 0.6            # Reference friction coefficient fo
+reference_slip_rate = 1.0e-6        # Reference slip rate Vo (m/s)
+
+[physics.initial_conditions]
+type = "depth_dependent"
+velocity_strengthening_shallow = true
+
+[solvers]
+cfl_number = 0.6                    # CFL stability criterion
+dt_max_days = 100.0                 # Maximum timestep in days
+dt_min_factor = 0.2                 # dt_min = factor * dx/Vp (uses P-wave velocity)
+
+[solvers.quasistatic]
+tolerance = 1.0e-6
+max_iterations = 200                # More iterations for 2x larger system
+amg_max_levels = 10
+
+[solvers.dynamic]
+velocity_threshold_qs_to_dyn = 5.0e-3
+velocity_threshold_dyn_to_qs = 2.0e-3
+
+[output]
+format = "hdf5"
+log_interval = 500
+timeseries_depths = [0.0, 2.5, 5.0, 7.5, 10.0, 12.5, 15.0, 17.5, 20.0]
+snapshot_interval_years = 1.0
+
+[output.fields]
+displacement = true
+velocity = true
+fault_slip = true
+fault_stress = true
+state_variable = true
+
+[output.snapshots]
+enabled = true
+quasistatic_interval_years = 2.0
+dynamic_interval = 0.1
+velocity_threshold = 1.0e-3
+
+[checkpointing]
+enabled = true
+interval_years = 100.0
+keep_last = 5

@@ -49,20 +49,27 @@ include("Mesh/Mesh.jl")
 
 include("Physics/RateStateFriction.jl")
 include("Physics/InitialConditions.jl")
+include("Physics/InitialConditionsPlaneStrain.jl")
 include("Physics/Physics.jl")
 
 include("Discretization/MassMatrix.jl")
 include("Discretization/StiffnessMatrix.jl")
+include("Discretization/StiffnessMatrixPlaneStrain.jl")
+include("Discretization/MassMatrixPlaneStrain.jl")
 include("Discretization/MatrixFreeOperator.jl")
 include("Discretization/Discretization.jl")
 
 include("Solvers/FaultSolvers.jl")
+include("Solvers/FaultSolversPlaneStrain.jl")
 include("Solvers/QuasistaticSolver.jl")
+include("Solvers/QuasistaticSolverPlaneStrain.jl")
 include("Solvers/DynamicSolver.jl")
+include("Solvers/DynamicSolverPlaneStrain.jl")
 include("Solvers/Timestepping.jl")
 include("Solvers/Solvers.jl")
 
 include("Simulation/SimulationState.jl")
+include("Simulation/SimulationStatePlaneStrain.jl")
 include("Simulation/TimeLoop.jl")
 include("Simulation/Simulation.jl")
 
@@ -78,5 +85,6 @@ export SimulationConfig, MeshConfig, PhysicsConfig, SolverConfig, OutputConfig, 
 export load_config, validate_config
 export build_simulation, run!
 export load_checkpoint, save_checkpoint
+export SimulationStatePlaneStrain
 
 end # module SEAS_SEME

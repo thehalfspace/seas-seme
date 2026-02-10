@@ -59,6 +59,9 @@ Material properties for elastic wave propagation.
 - `ρ::T`: Density (kg/m³)
 - `vs::T`: Shear wave velocity (m/s)
 - `μ::T`: Shear modulus (Pa), computed as ρ*vs²
+- `λ::T`: First Lamé parameter (Pa), zero for antiplane
+- `vp::T`: P-wave velocity (m/s), zero for antiplane
+- `ν::T`: Poisson's ratio (dimensionless), zero for antiplane
 
 # Notes
 Typical crustal values:
@@ -70,16 +73,33 @@ struct MaterialProperties{T<:AbstractFloat}
     ρ::T
     vs::T
     μ::T
+    λ::T
+    vp::T
+    ν::T
 end
 
 """
     MaterialProperties(ρ::T, vs::T) where T -> MaterialProperties{T}
 
-Construct material properties, computing shear modulus μ = ρ*vs².
+Construct material properties for antiplane formulation (λ=0, vp=0, ν=0).
+Computes shear modulus μ = ρ*vs².
 """
 function MaterialProperties(ρ::T, vs::T) where {T<:AbstractFloat}
     μ = ρ * vs^2
-    return MaterialProperties(ρ, vs, μ)
+    return MaterialProperties(ρ, vs, μ, zero(T), zero(T), zero(T))
+end
+
+"""
+    MaterialProperties(ρ::T, vs::T, ν::T) where T -> MaterialProperties{T}
+
+Construct material properties for plane-strain formulation.
+Computes μ = ρ*vs², λ = 2μν/(1-2ν), vp = √((λ+2μ)/ρ).
+"""
+function MaterialProperties(ρ::T, vs::T, ν::T) where {T<:AbstractFloat}
+    μ = ρ * vs^2
+    λ = 2μ * ν / (1 - 2ν)
+    vp = sqrt((λ + 2μ) / ρ)
+    return MaterialProperties(ρ, vs, μ, λ, vp, ν)
 end
 
 """

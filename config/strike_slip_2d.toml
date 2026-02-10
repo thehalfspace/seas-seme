@@ -18,6 +18,11 @@ file = "./data/mesh/homogeneous/homogeneous.mesh"     # HOHQMesh mesh file
 polynomial_degree = 4               # Spectral element polynomial degree (p=4)
 
 [physics]
+# Deformation formulation: "antiplane" (SH waves) or "plane_strain" (P-SV waves)
+formulation = "antiplane"
+dip_angle = 90.0                    # Fault dip angle in degrees (90 = vertical)
+poisson_ratio = 0.25                # Poisson's ratio (used for plane_strain only)
+
 # Material properties
 density = 2670.0                    # Density (kg/m³)
 shear_velocity = 3464.0             # Shear wave velocity (m/s)

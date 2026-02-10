@@ -50,3 +50,13 @@ export fault_slip_rate, state_time_evolution, nr_search
 export QuasistaticSolver, build_quasistatic_solver, quasistatic_step!
 export DynamicSolver, dynamic_step!
 export AdaptiveTimestepper, compute_timestep, determine_solver_mode
+
+# Plane-strain solver exports
+export QuasistaticSolverPlaneStrain, build_quasistatic_solver_plane_strain
+export DynamicSolverPlaneStrain
+export fault_traction_from_force_plane_strain
+export compute_stick_traction_plane_strain
+export apply_fault_traction_plane_strain!
+export compute_fault_impedance_plane_strain
+export set_fault_velocity_plane_strain!
+export get_fault_tangential_velocity

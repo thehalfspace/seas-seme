@@ -175,41 +175,63 @@ function build_mesh(config::MeshConfig, physics::PhysicsConfig)::UnstructuredSEM
     impedance_absorbing = ρ * vs
     impedance_fault = 1.0  # Fault/creep use unit impedance
 
+    # P-wave impedance (zero for antiplane, computed for plane_strain)
+    # Compute vp from poisson_ratio if plane_strain
+    impedance_absorbing_p = 0.0
+    if physics.formulation == :plane_strain
+        μ_val = ρ * vs^2
+        λ_val = 2μ_val * physics.poisson_ratio / (1 - 2 * physics.poisson_ratio)
+        vp = sqrt((λ_val + 2μ_val) / ρ)
+        impedance_absorbing_p = ρ * vp
+    end
+
     # Extract fault boundary (right, upper half: 20-40 km)
-    fault_ids, fault_x, fault_y, fault_mat = get_boundary_nodes(
+    fault_ids, fault_x, fault_y, fault_mat, fault_tan, fault_nrm, fault_mat_p = get_boundary_nodes(
         trixi_mesh, node_coords, jac_matrix, basis.weights,
-        impedance_fault, dof_id, :fault, nodes, face_map
+        impedance_fault, dof_id, :fault, nodes, face_map,
+        impedance_p=0.0
     )
 
     # Extract creep boundary (right, lower half: 0-20 km)
-    creep_ids, creep_x, creep_y, creep_mat = get_boundary_nodes(
+    creep_ids, creep_x, creep_y, creep_mat, creep_tan, creep_nrm, creep_mat_p = get_boundary_nodes(
         trixi_mesh, node_coords, jac_matrix, basis.weights,
-        impedance_fault, dof_id, :creep, nodes, face_map
+        impedance_fault, dof_id, :creep, nodes, face_map,
+        impedance_p=0.0
     )
 
     # Extract absorbing boundary (left + bottom)
-    absorb_ids, absorb_x, absorb_y, absorb_mat = get_boundary_nodes(
+    absorb_ids, absorb_x, absorb_y, absorb_mat, absorb_tan, absorb_nrm, absorb_mat_p = get_boundary_nodes(
         trixi_mesh, node_coords, jac_matrix, basis.weights,
-        impedance_absorbing, dof_id, :absorbing, nodes, face_map
+        impedance_absorbing, dof_id, :absorbing, nodes, face_map,
+        impedance_p=impedance_absorbing_p
     )
 
     # Create BoundaryData structs
     fault_boundary = BoundaryData(
         fault_ids,
         hcat(fault_x, fault_y)',  # [2 x nnodes]
-        fault_mat
+        fault_mat,
+        fault_tan,
+        fault_nrm,
+        fault_mat_p
     )
 
     creep_boundary = BoundaryData(
         creep_ids,
         hcat(creep_x, creep_y)',
-        creep_mat
+        creep_mat,
+        creep_tan,
+        creep_nrm,
+        creep_mat_p
     )
 
     absorbing_boundary = BoundaryData(
         absorb_ids,
         hcat(absorb_x, absorb_y)',
-        absorb_mat
+        absorb_mat,
+        absorb_tan,
+        absorb_nrm,
+        absorb_mat_p
     )
 
     boundaries = BoundaryInfo(fault_boundary, creep_boundary, absorbing_boundary)

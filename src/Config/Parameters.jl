@@ -122,6 +122,9 @@ Physical parameters for the simulation.
 - `density::Float64`: Material density (kg/m³)
 - `shear_velocity::Float64`: Shear wave velocity (m/s)
 - `initial_conditions::InitialConditionsConfig`: Initial condition parameters
+- `formulation::Symbol`: Deformation formulation (:antiplane or :plane_strain)
+- `dip_angle::Float64`: Fault dip angle in degrees (90 = vertical)
+- `poisson_ratio::Float64`: Poisson's ratio ν (only used for plane_strain)
 """
 struct PhysicsConfig
     plate_velocity::Float64
@@ -130,6 +133,9 @@ struct PhysicsConfig
     density::Float64
     shear_velocity::Float64
     initial_conditions::InitialConditionsConfig
+    formulation::Symbol              # :antiplane or :plane_strain
+    dip_angle::Float64               # Fault dip angle in degrees (90 = vertical)
+    poisson_ratio::Float64           # Poisson's ratio ν (used for plane_strain)
 end
 
 """

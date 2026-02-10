@@ -8,9 +8,13 @@ simulation from a configuration file, ready to run.
 """
 
 """
-    Simulation{T}
+    Simulation{T, S, QS, DS}
 
-Container for all simulation components.
+Container for all simulation components. Parameterized on:
+- `T`: Float type
+- `S`: State type (SimulationState{T} or SimulationStatePlaneStrain{T})
+- `QS`: Quasi-static solver type
+- `DS`: Dynamic solver type
 
 # Fields
 - `config::SimulationConfig`: Configuration parameters
@@ -18,9 +22,9 @@ Container for all simulation components.
 - `physics::MaterialProperties{T}`: Material properties
 - `ics`: Initial conditions
 - `params`: Simulation parameters (Vpl, V₀, f₀, etc.)
-- `state::SimulationState{T}`: Current simulation state
-- `qs_solver::QuasistaticSolver`: Quasi-static solver with AMG
-- `dyn_solver::DynamicSolver{T}`: Dynamic solver
+- `state::S`: Current simulation state
+- `qs_solver::QS`: Quasi-static solver
+- `dyn_solver::DS`: Dynamic solver
 - `timestepper::AdaptiveTimestepper{T}`: Timestep controller
 - `io_manager`: I/O manager for output
 - `log_io::IO`: Log file IO stream
@@ -34,15 +38,15 @@ sim = build_simulation(config)
 run!(sim)
 ```
 """
-struct Simulation{T<:AbstractFloat}
+struct Simulation{T<:AbstractFloat, S, QS, DS}
     config::SimulationConfig
     mesh::UnstructuredSEMesh{T}
     physics::MaterialProperties{T}
     ics
     params
-    state::SimulationState{T}
-    qs_solver::QuasistaticSolver
-    dyn_solver::DynamicSolver{T}
+    state::S
+    qs_solver::QS
+    dyn_solver::DS
     timestepper::AdaptiveTimestepper{T}
     io_manager
     log_io::IO
@@ -81,11 +85,25 @@ run!(sim)
 ```
 """
 function build_simulation(config::SimulationConfig; T::Type=Float64)
+    if config.physics.formulation == :plane_strain
+        return build_simulation_plane_strain(config, T=T)
+    else
+        return build_simulation_antiplane(config, T=T)
+    end
+end
+
+
+"""
+    build_simulation_antiplane(config; T=Float64) -> Simulation
+
+Build antiplane (SH) simulation. This is the original build path, unchanged.
+"""
+function build_simulation_antiplane(config::SimulationConfig; T::Type=Float64)
     # Setup logging to both console and file
     _, log_io = setup_logging(config)
 
     println("\n" * "="^80)
-    println("Building Simulation")
+    println("Building Simulation (Antiplane / SH)")
     println("="^80)
 
     # 1. Build mesh (needs physics config for boundary impedance)
@@ -192,7 +210,7 @@ function build_simulation(config::SimulationConfig; T::Type=Float64)
     io_manager = create_io_manager(config, mesh)
 
     println("\n" * "="^80)
-    println("Simulation built successfully!")
+    println("Simulation built successfully! (Antiplane)")
     println("="^80)
     println("\nSimulation directory: $(config.simulation.output_dir)")
     println("├── config.toml")
@@ -208,7 +226,168 @@ function build_simulation(config::SimulationConfig; T::Type=Float64)
     println("  $(mesh.n_elements) elements, polynomial degree $(mesh.polynomial_degree)")
     println("="^80)
 
-    return Simulation{T}(
+    return Simulation(
+        config, mesh, physics, ics, params,
+        state, qs_solver, dyn_solver, timestepper,
+        io_manager, log_io, M_global, K_el
+    )
+end
+
+
+"""
+    build_simulation_plane_strain(config; T=Float64) -> Simulation
+
+Build plane-strain (P-SV) simulation with 2-component displacement.
+"""
+function build_simulation_plane_strain(config::SimulationConfig; T::Type=Float64)
+    _, log_io = setup_logging(config)
+
+    println("\n" * "="^80)
+    println("Building Simulation (Plane-Strain / P-SV)")
+    println("="^80)
+    @printf("  Dip angle: %.1f°\n", config.physics.dip_angle)
+    @printf("  Poisson's ratio: %.3f\n", config.physics.poisson_ratio)
+
+    # 1. Build mesh
+    println("\n[1/9] Building mesh...")
+    mesh = build_mesh(config.mesh, config.physics)
+    @printf("  Mesh loaded: %d elements, %d spatial DOFs, %d total DOFs\n",
+           mesh.n_elements, mesh.ndof, 2 * mesh.ndof)
+    @printf("  Polynomial degree: p=%d\n", mesh.polynomial_degree)
+
+    # 2. Material properties (3-arg constructor: ρ, vs, ν)
+    println("\n[2/9] Setting material properties...")
+    T = Float64
+    physics = MaterialProperties(
+        T(config.physics.density),
+        T(config.physics.shear_velocity),
+        T(config.physics.poisson_ratio)
+    )
+    @printf("  Density: %.1f kg/m³\n", physics.ρ)
+    @printf("  Shear velocity: %.1f m/s\n", physics.vs)
+    @printf("  P-wave velocity: %.1f m/s\n", physics.vp)
+    @printf("  Shear modulus: %.2e Pa\n", physics.μ)
+    @printf("  Lamé λ: %.2e Pa\n", physics.λ)
+    @printf("  Poisson's ratio: %.3f\n", physics.ν)
+
+    # 3. Build mass and stiffness matrices
+    println("\n[3/9] Computing elemental matrices (plane-strain)...")
+    basis = LobattoLegendreBasis(mesh.polynomial_degree)
+
+    M_el, M_global = build_mass_matrices_plane_strain(mesh, physics, basis)
+    K_el = build_stiffness_matrices_plane_strain(mesh, physics, basis)
+    @printf("  Plane-strain mass and stiffness matrices computed\n")
+
+    ndof = mesh.ndof
+
+    # 4. CFL timestep (based on P-wave velocity, which is faster)
+    println("\n[4/9] Applying boundary conditions...")
+    hcell = minimum(diff(mesh.boundaries.fault.coords[2,:]))
+    dt_min = T(config.solvers.dt_min_factor) * hcell / physics.vp
+    @printf("  Minimum timestep (CFL, Vp-based): %.3e s\n", dt_min)
+
+    # Absorbing boundary mass correction
+    absorbing_id = mesh.boundaries.absorbing.node_ids
+    absorb_matrix = mesh.boundaries.absorbing.matrix
+
+    # Apply to both x and y components
+    for i in eachindex(absorbing_id)
+        nid = absorbing_id[i]
+        M_global[nid]        += T(0.5) * dt_min * absorb_matrix[i]
+        M_global[ndof + nid] += T(0.5) * dt_min * absorb_matrix[i]
+    end
+
+    @printf("  Absorbing boundaries: %d nodes\n", length(absorbing_id))
+    @printf("  Fault nodes: %d\n", length(mesh.boundaries.fault.node_ids))
+    @printf("  Creep boundary nodes: %d\n", length(mesh.boundaries.creep.node_ids))
+
+    # 5. Generate initial conditions
+    println("\n[5/9] Generating initial conditions...")
+    params = (
+        Vpl = T(config.physics.plate_velocity),
+        Vo = T(config.physics.reference_slip_rate),
+        fo = T(config.physics.reference_friction),
+        yr2sec = T(365.25 * 24 * 3600)
+    )
+
+    ics = build_initial_conditions_plane_strain(config.physics, mesh,
+                                                config.physics.dip_angle)
+    @printf("  Initial conditions generated\n")
+    @printf("  Fault depth range: %.1f - %.1f km\n",
+           minimum(mesh.boundaries.fault.coords[2,:]) / 1000,
+           maximum(mesh.boundaries.fault.coords[2,:]) / 1000)
+
+    # 6. Build solvers
+    println("\n[6/9] Building solvers...")
+
+    # Free DOF indices in 2*ndof space
+    # Both x and y components of fault/creep nodes are prescribed
+    interface_id_spatial = sort(unique(vcat(mesh.boundaries.creep.node_ids,
+                                            mesh.boundaries.fault.node_ids)))
+
+    # In 2*ndof space: fault/creep nodes for both components
+    interface_id_2n = vcat(interface_id_spatial, ndof .+ interface_id_spatial)
+    fltni = collect(1:2*ndof)
+    deleteat!(fltni, sort(interface_id_2n))
+
+    qs_solver = build_quasistatic_solver_plane_strain(
+        K_el, mesh.dof_id, mesh, fltni,
+        tolerance=T(config.solvers.quasistatic.tolerance),
+        max_iterations=config.solvers.quasistatic.max_iterations,
+        amg_max_levels=config.solvers.quasistatic.amg_max_levels,
+        verbose=true
+    )
+    @printf("  Plane-strain quasi-static solver built (AMG-CG)\n")
+
+    dyn_solver = DynamicSolverPlaneStrain(dt_min, verbose=false)
+    @printf("  Plane-strain dynamic solver built (leap-frog)\n")
+
+    # 7. Build timestepper
+    println("\n[7/9] Configuring timestepper...")
+    timestepper = AdaptiveTimestepper(
+        dt_min,
+        T(config.solvers.dt_max),
+        hcell,
+        physics.μ,
+        T(config.solvers.dynamic.velocity_threshold_qs_to_dyn),
+        T(config.solvers.dynamic.velocity_threshold_dyn_to_qs)
+    )
+    @printf("  Adaptive timestepping configured\n")
+    @printf("  dt_min: %.3e s, dt_max: %.3e s\n", dt_min, config.solvers.dt_max)
+
+    # 8. Initialize simulation state
+    println("\n[8/9] Initializing simulation state...")
+    state = SimulationStatePlaneStrain(mesh, ics, params, v_init=T(5.0e-4))
+    @printf("  Plane-strain simulation state initialized\n")
+    @printf("  Initial max slip rate: %.3e m/s\n", maximum_fault_slip_rate(state))
+
+    # 9. Save initial parameters
+    println("\n[9/9] Saving initial parameters...")
+    save_initial_parameters(config, ics, mesh)
+    @printf("  Parameters saved to: %s\n", joinpath(config.simulation.output_dir, "params"))
+
+    # 10. Create I/O manager
+    io_manager = create_io_manager(config, mesh)
+
+    println("\n" * "="^80)
+    println("Simulation built successfully! (Plane-Strain)")
+    println("="^80)
+    println("\nSimulation directory: $(config.simulation.output_dir)")
+    println("├── config.toml")
+    println("├── output.log")
+    println("├── params/")
+    println("│   ├── friction_parameters.dat")
+    println("│   ├── initial_stress.dat")
+    println("│   └── fault_coordinates.dat")
+    println("├── outputs/")
+    println("│   └── $(config.simulation.name).h5")
+    println("└── checkpoints/")
+    println("\nMesh: $(config.mesh.file)")
+    println("  $(mesh.n_elements) elements, polynomial degree $(mesh.polynomial_degree)")
+    println("  Formulation: plane-strain, dip angle: $(config.physics.dip_angle)°")
+    println("="^80)
+
+    return Simulation(
         config, mesh, physics, ics, params,
         state, qs_solver, dyn_solver, timestepper,
         io_manager, log_io, M_global, K_el

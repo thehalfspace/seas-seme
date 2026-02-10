@@ -146,21 +146,31 @@ function load_checkpoint(filepath::String, mesh)
         error("Mesh mismatch: checkpoint mesh incompatible with current mesh")
     end
 
-    # Reconstruct physics
-    physics = MaterialProperties(
-        config.physics.density,
-        config.physics.shear_velocity
-    )
+    # Reconstruct physics (formulation-aware)
+    if config.physics.formulation == :plane_strain
+        physics = MaterialProperties(
+            config.physics.density,
+            config.physics.shear_velocity,
+            config.physics.poisson_ratio
+        )
+    else
+        physics = MaterialProperties(
+            config.physics.density,
+            config.physics.shear_velocity
+        )
+    end
 
     # Create I/O manager (will be reinitialized)
     io_manager = create_io_manager(config, mesh)
 
+    # Setup logging for resumed simulation
+    _, log_io = setup_logging(config)
+
     # Reconstruct simulation
-    T = eltype(state.u)
-    simulation = Simulation{T}(
+    simulation = Simulation(
         config, mesh, physics, ics, params,
         state, qs_solver, dyn_solver, timestepper,
-        io_manager, M_global, K_el
+        io_manager, log_io, M_global, K_el
     )
 
     # Display checkpoint info

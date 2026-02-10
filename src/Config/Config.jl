@@ -104,13 +104,20 @@ function parse_physics_config(dict::Dict)::PhysicsConfig
         get(dict["initial_conditions"], "file", nothing)
     )
 
+    # Parse formulation (default: antiplane for backward compatibility)
+    formulation_str = get(dict, "formulation", "antiplane")
+    formulation = Symbol(formulation_str)
+
     return PhysicsConfig(
         dict["plate_velocity"],
         dict["reference_friction"],
         dict["reference_slip_rate"],
         dict["density"],
         dict["shear_velocity"],
-        ic_config
+        ic_config,
+        formulation,
+        get(dict, "dip_angle", 90.0),
+        get(dict, "poisson_ratio", 0.25)
     )
 end
 
@@ -259,6 +266,14 @@ function validate_config(config::SimulationConfig)
     config.physics.reference_slip_rate > 0 || error("reference_slip_rate must be positive")
     config.physics.density > 0 || error("density must be positive")
     config.physics.shear_velocity > 0 || error("shear_velocity must be positive")
+    config.physics.formulation in (:antiplane, :plane_strain) ||
+        error("formulation must be :antiplane or :plane_strain, got $(config.physics.formulation)")
+    0 < config.physics.dip_angle <= 90 ||
+        error("dip_angle must be in (0, 90] degrees, got $(config.physics.dip_angle)")
+    if config.physics.formulation == :plane_strain
+        0 < config.physics.poisson_ratio < 0.5 ||
+            error("poisson_ratio must be in (0, 0.5) for plane_strain, got $(config.physics.poisson_ratio)")
+    end
 
     # Solver validation
     0 < config.solvers.cfl_number <= 1 || error("cfl_number must be in (0, 1]")

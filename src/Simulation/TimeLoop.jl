@@ -97,7 +97,7 @@ function run!(simulation)
                 state.timestep = total_time - state.time
             end
 
-            # Take time step
+            # Take time step (dispatches on state type via multiple dispatch)
             if state.solver_mode == :quasistatic
                 quasistatic_step!(state, qs_solver, mesh, physics, ics, params,
                                  state.timestep)
@@ -198,7 +198,7 @@ end
 
 Determine if output should be written at current iteration.
 """
-function should_write_output(state::SimulationState, config)
+function should_write_output(state, config)
     # Write every iteration during dynamic events
     if state.solver_mode == :dynamic
         return true
@@ -215,7 +215,7 @@ end
 
 Determine if checkpoint should be saved at current iteration.
 """
-function should_save_checkpoint(state::SimulationState, config)
+function should_save_checkpoint(state, config)
     if !config.checkpointing.enabled
         return false
     end
@@ -237,7 +237,7 @@ end
 
 Determine if progress should be displayed.
 """
-function should_display_progress(state::SimulationState, log_interval::Int,
+function should_display_progress(state, log_interval::Int,
                                  last_log_time::DateTime)
     # Display every log_interval iterations
     if mod(state.iteration, log_interval) == 0
@@ -254,7 +254,7 @@ end
 
 Display progress information.
 """
-function display_progress(state::SimulationState, total_time::Real,
+function display_progress(state, total_time::Real,
                          t_start::DateTime, Vf_max::Real)
     elapsed = now() - t_start
     progress_pct = 100 * state.time / total_time
