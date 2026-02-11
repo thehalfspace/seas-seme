@@ -18,9 +18,9 @@ start_y = 20.0e3               # Y-coordinate where fault begins (20 km)
 
 [meshing]
 # Element sizing (meters)
-background_grid_size = 1.0e3   # Default element size away from fault (2 km)
-fault_refinement_h = 0.1e3     # Target element size along fault (200 m)
-fault_refinement_width = 10.0e3 # Width of refinement zone around fault (2 km)
+background_grid_size = 2.0e3   # Default element size away from fault (2 km)
+fault_refinement_h = 1e3     # Target element size along fault (200 m)
+fault_refinement_width = 5.0e3 # Width of refinement zone around fault (2 km)
 
 # Spectral element configuration
 polynomial_order = 4           # Polynomial degree (p=4 means 5 nodes per element)
@@ -37,7 +37,7 @@ smoothing_iterations = 50      # Number of spring smoothing iterations
 
 [output]
 # Mesh output configuration
-output_dir = "data/mesh/homogeneous"  # Full path to save mesh files
+output_dir = "data/mesh/homogeneous_lowres"  # Full path to save mesh files
 mesh_name = "homogeneous"         # Base name for generated files
                                       # Generates: {mesh_name}.control, {mesh_name}.mesh, {mesh_name}.tec
 

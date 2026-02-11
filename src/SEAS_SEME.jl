@@ -59,6 +59,9 @@ include("Discretization/MassMatrixPlaneStrain.jl")
 include("Discretization/MatrixFreeOperator.jl")
 include("Discretization/Discretization.jl")
 
+include("Simulation/SimulationState.jl")
+include("Simulation/SimulationStatePlaneStrain.jl")
+
 include("Solvers/FaultSolvers.jl")
 include("Solvers/FaultSolversPlaneStrain.jl")
 include("Solvers/QuasistaticSolver.jl")
@@ -68,8 +71,6 @@ include("Solvers/DynamicSolverPlaneStrain.jl")
 include("Solvers/Timestepping.jl")
 include("Solvers/Solvers.jl")
 
-include("Simulation/SimulationState.jl")
-include("Simulation/SimulationStatePlaneStrain.jl")
 include("Simulation/TimeLoop.jl")
 include("Simulation/Simulation.jl")
 

@@ -14,88 +14,97 @@ using Printf
 """
     plot_slip_contours(h5_file::String;
                       output_file="slip_contours.png",
-                      time_units="years",
-                      figsize=(1000, 600),
+                      figsize=(800, 600),
                       max_depth=nothing,
-                      colormap=:viridis,
-                      levels=20)
+                      velocity_threshold=1e-3,
+                      dynamic_step=1,
+                      quasistatic_step=1)
 
-Create contour plot of cumulative slip vs depth and time from snapshot data.
+Plot cumulative slip profiles from snapshot data with seismic/interseismic coloring.
+
+- Y-axis: Depth (km), surface at top
+- X-axis: Cumulative slip (m)
+- Red lines: seismic (dynamic) snapshots (max slip rate >= threshold)
+- Blue lines: interseismic (quasistatic) snapshots
 
 # Arguments
 - `h5_file::String`: Path to HDF5 output file with snapshots
 - `output_file::String`: Output filename (default: "slip_contours.png")
-- `time_units::String`: "years" or "seconds" (default: "years")
-- `figsize::Tuple{Int,Int}`: Figure size in pixels (default: (1000, 600))
+- `figsize::Tuple{Int,Int}`: Figure size in pixels (default: (800, 600))
 - `max_depth::Union{Float64,Nothing}`: Maximum depth to plot in km (default: nothing = all)
-- `colormap::Symbol`: Colormap for contours (default: :viridis)
-- `levels::Int`: Number of contour levels (default: 20)
+- `velocity_threshold::Float64`: Slip rate threshold for seismic classification (m/s, default: 1e-3)
+- `dynamic_step::Int`: Plot every Nth dynamic snapshot (default: 1 = all)
+- `quasistatic_step::Int`: Plot every Nth quasistatic snapshot (default: 1 = all)
 
 # Example
 ```julia
-using SEAS_SEME
-
-# Plot slip contours
-plot_slip_contours("data/strike_slip_2d/outputs/strike_slip_2d.h5")
-
-# Custom settings
-plot_slip_contours("data/strike_slip_2d/outputs/strike_slip_2d.h5",
-                  time_units="years",
-                  max_depth=30.0,
-                  colormap=:thermal,
-                  levels=30)
+plot_slip_contours("data/plane_strain_2d/outputs/plane_strain_2d.h5",
+                  max_depth=20.0, dynamic_step=10)
 ```
 """
 function plot_slip_contours(h5_file::String;
                            output_file="slip_contours.png",
-                           time_units="years",
-                           figsize=(1000, 600),
+                           figsize=(800, 600),
                            max_depth=nothing,
-                           colormap=:viridis,
-                           levels=20)
-    # Read snapshot data
+                           velocity_threshold=1e-3,
+                           dynamic_step=1,
+                           quasistatic_step=1)
+    # Read snapshot data: slip is [n_fault x n_snapshots]
     times, slip, slip_rate, stress, state, depths_km = read_snapshots(h5_file)
-
-    # Convert time units
-    yr2sec = 365.25 * 24 * 60 * 60
-    if time_units == "years"
-        times_plot = times ./ yr2sec
-        time_label = "Time (years)"
-    elseif time_units == "seconds"
-        times_plot = times
-        time_label = "Time (s)"
-    else
-        error("time_units must be 'years' or 'seconds'")
-    end
 
     # Filter by depth if requested
     if !isnothing(max_depth)
         mask = depths_km .<= max_depth
         depths_km = depths_km[mask]
         slip = slip[mask, :]
+        slip_rate = slip_rate[mask, :]
     end
 
+    # Shift depths so free surface = 0 (surface is max value in coordinate system)
+    surface_depth = maximum(depths_km)
+    depths_km = depths_km .- surface_depth  # e.g., -40 → 0, -20 → 20
+
+    # Classify each snapshot by max slip rate on fault
+    max_sr = vec(maximum(slip_rate, dims=1))
+    is_dynamic = max_sr .>= velocity_threshold
+
+    dynamic_indices = findall(is_dynamic)
+    quasistatic_indices = findall(.!is_dynamic)
+
+    # Subsample
+    dynamic_indices = dynamic_indices[1:dynamic_step:end]
+    quasistatic_indices = quasistatic_indices[1:quasistatic_step:end]
+
     # Create figure
-    fig = Figure(resolution=figsize)
+    fig = Figure(size=figsize)
 
     ax = Axis(fig[1, 1],
-             xlabel=time_label,
+             xlabel="Cumulative Slip (m)",
              ylabel="Depth (km)",
              yreversed=true,
-             title="Cumulative Slip Evolution")
+             title="Cumulative Slip Profiles")
 
-    # Create contour plot
-    cf = contourf!(ax, times_plot, depths_km, slip,
-                  levels=levels,
-                  colormap=colormap)
+    # Plot interseismic first (behind)
+    for idx in quasistatic_indices
+        lines!(ax, slip[:, idx], depths_km,
+              color=(:royalblue, 0.6), linewidth=0.8)
+    end
 
-    # Add colorbar
-    Colorbar(fig[1, 2], cf, label="Cumulative Slip (m)")
+    # Plot seismic on top
+    for idx in dynamic_indices
+        lines!(ax, slip[:, idx], depths_km,
+              color=(:chocolate, 0.5), linewidth=1.2)
+    end
+
+    # Legend
+    lines!(ax, [NaN], [NaN], color=:chocolate, linewidth=1.5, label="Seismic")
+    lines!(ax, [NaN], [NaN], color=:royalblue, linewidth=1.0, label="Interseismic")
+    axislegend(ax, position=:rb)
 
     # Save figure
     save(output_file, fig)
 
-    @info "Slip contours plot saved" file=output_file n_snapshots=length(times)
+    @info "Slip contours plot saved" file=output_file n_dynamic=length(dynamic_indices) n_quasistatic=length(quasistatic_indices)
 
     return fig
 end

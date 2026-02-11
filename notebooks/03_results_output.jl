@@ -25,7 +25,7 @@ let
 	# Read all snapshot data
 	times, slip, slip_rate, stress, state, depths_km = read_snapshots("../data/strike_slip_2d/outputs/strike_slip_2d.h5")
 
-	config = get_snapshot_config("../data/strike_slip_2d/outputs/strike_slip_2d.h5")
+	config = get_snapshot_config("../data/plane_strain_2d/outputs/plane_strain_2d.h5")
 end
 
 # ╔═╡ 3193a07c-03b3-11ed-38c7-15818fc5ee26
@@ -51,7 +51,7 @@ Specify the simulation directory and HDF5 output file location.
 # ╔═╡ aee6645e-f699-4a7c-8a05-46ee0b9fe545
 begin
 	# Set simulation directory
-	simulation_name = "strike_slip_benchmark"
+	simulation_name = "plane_strain_2d"
 	base_dir = joinpath(dirname(pwd()), "data")
 	sim_dir = joinpath(base_dir, simulation_name)
 	h5_file = joinpath(sim_dir, "outputs", "$(simulation_name).h5")
