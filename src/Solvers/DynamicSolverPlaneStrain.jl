@@ -117,6 +117,11 @@ function dynamic_step!(state::SimulationStatePlaneStrain{T},
 
     # Steps 5-7: Solve nonlinear fault boundary equations
     for i in eachindex(fault_id)
+        # Normal stress: use constant σ_n⁰ for now.
+        # TODO: For dipping faults, compute Δσ_n from elastic forces and use
+        # σn_eff = ics.σo[i] + state.σn_perturbation[i]
+        σn_eff = ics.σo[i]
+
         # Update state variable
         state.ψ[i] = state_time_evolution(state.ψ[i], Vf_prev[i], dt,
                                          ics.friction.Lc[i], params.Vo)
@@ -129,7 +134,7 @@ function dynamic_step!(state::SimulationStatePlaneStrain{T},
         # Newton-Raphson search (1st iteration)
         state.Vf[i], state.τf[i] = nr_search(
             τ_total_guess, params.fo, params.Vo,
-            ics.friction.a[i], ics.friction.b[i], ics.σo[i],
+            ics.friction.a[i], ics.friction.b[i], σn_eff,
             ics.τo[i], state.ψ[i], fault_z[i], state.fault_vfree[i]
         )
 
@@ -145,7 +150,7 @@ function dynamic_step!(state::SimulationStatePlaneStrain{T},
 
         state.Vf[i], state.τf[i] = nr_search(
             state.τf[i], params.fo, params.Vo,
-            ics.friction.a[i], ics.friction.b[i], ics.σo[i],
+            ics.friction.a[i], ics.friction.b[i], σn_eff,
             ics.τo[i], state.ψ[i], fault_z[i], state.fault_vfree[i]
         )
     end

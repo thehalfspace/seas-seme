@@ -13,10 +13,10 @@ end
 
 # ╔═╡ 9edf9ace-0662-4552-ba6c-5ef95ed3a6f6
 begin
-	#dat = "../data/plane_strain_2d/outputs/plane_strain_2d.h5"
-	#out = "../data/strike_slip_2d/slip2.png"
-	dat = "../data/strike_slip_2d/outputs/strike_slip_2d.h5"
+	dat = "../data/plane_strain_2d/outputs/plane_strain_2d.h5"
 	out = "../data/strike_slip_2d/slip2.png"
+	#dat = "../data/strike_slip_2d/outputs/strike_slip_2d.h5"
+	#out = "../data/strike_slip_2d/slip2.png"
 	plot_slip_contours(dat,
                  output_file=out,
                  max_depth=20.0,  # Optional: limit depth

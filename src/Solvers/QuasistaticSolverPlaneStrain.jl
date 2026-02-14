@@ -186,16 +186,22 @@ function quasistatic_step!(state::SimulationStatePlaneStrain{T},
         state.a[creep_id] .= 0
         state.a[ndof .+ creep_id] .= 0
 
-        # Extract tangential shear traction
-        state.τf .= fault_traction_from_force_plane_strain(
+        # Extract tangential shear traction and normal stress perturbation
+        τf_new, σn_pert = fault_traction_from_force_plane_strain(
             state.a, fault_id, fault_matrix, tangent, state.fault_normal, ndof
         )
+        state.τf .= τf_new
+        state.σn_perturbation .= σn_pert
 
         # Steps 4 & 5: Update state variable and slip rate
         for i in eachindex(fault_id)
             state.ψ[i] = state_time_evolution(state.ψ[i], Vf_new[i], dt,
                                              ics.friction.Lc[i], params.Vo)
 
+            # Normal stress: use constant σ_n⁰ for now.
+            # TODO: For dipping faults, use σn_eff = ics.σo[i] + state.σn_perturbation[i]
+            # The perturbation extraction needs calibration (subtract initial state contribution)
+            # before it can be used in the friction law.
             Vf_new[i] = fault_slip_rate(state.ψ[i], state.τf[i],
                                        ics.τo[i], ics.σo[i],
                                        ics.friction.a[i], ics.friction.b[i],

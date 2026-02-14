@@ -327,13 +327,63 @@ end
 
 
 """
+    compute_fault_slip(state, fault_id, fault_idx, time, Vpl)
+
+Compute cumulative slip at a single fault node (antiplane).
+"""
+function compute_fault_slip(state::SimulationState, fault_id, fault_idx::Int, time, Vpl)
+    return 2 * state.u[fault_id[fault_idx]] + Vpl * time
+end
+
+"""
+    compute_fault_slip(state, fault_id, fault_idx, time, Vpl)
+
+Compute cumulative slip at a single fault node (plane-strain).
+Projects displacement onto fault tangent direction.
+"""
+function compute_fault_slip(state::SimulationStatePlaneStrain, fault_id, fault_idx::Int, time, Vpl)
+    nid = fault_id[fault_idx]
+    u_tang = state.u[nid] * state.fault_tangent[1, fault_idx] +
+             state.u[state.ndof + nid] * state.fault_tangent[2, fault_idx]
+    return 2 * u_tang + Vpl * time
+end
+
+"""
+    compute_fault_slip_profile(state, fault_id, time, Vpl)
+
+Compute cumulative slip at all fault nodes (antiplane).
+"""
+function compute_fault_slip_profile(state::SimulationState, fault_id, time, Vpl)
+    return 2 .* state.u[fault_id] .+ Vpl * time
+end
+
+"""
+    compute_fault_slip_profile(state, fault_id, time, Vpl)
+
+Compute cumulative slip at all fault nodes (plane-strain).
+Projects displacement onto fault tangent direction.
+"""
+function compute_fault_slip_profile(state::SimulationStatePlaneStrain, fault_id, time, Vpl)
+    nfault = length(fault_id)
+    slip = zeros(eltype(state.u), nfault)
+    for i in 1:nfault
+        nid = fault_id[i]
+        u_tang = state.u[nid] * state.fault_tangent[1, i] +
+                 state.u[state.ndof + nid] * state.fault_tangent[2, i]
+        slip[i] = 2 * u_tang + Vpl * time
+    end
+    return slip
+end
+
+
+"""
     write_timestep!(io::HDF5OutputManager, state, mesh, ics, params)
 
 Write current timestep data to HDF5 file.
 
 # Arguments
 - `io::HDF5OutputManager`: Output manager
-- `state::SimulationState`: Current state
+- `state`: Current state (SimulationState or SimulationStatePlaneStrain)
 - `mesh`: Mesh with boundary info
 - `ics`: Initial conditions
 - `params`: Simulation parameters
@@ -364,7 +414,7 @@ function write_timestep!(io::HDF5OutputManager, state, mesh, ics, params)
         depth_path = "timeseries/$depth_str"
 
         # Compute quantities
-        slip = 2 * state.u[fault_id[fault_idx]] + params.Vpl * state.time
+        slip = compute_fault_slip(state, fault_id, fault_idx, state.time, params.Vpl)
         slip_rate = state.Vf[fault_idx]
         shear_stress = (state.τf[fault_idx] + ics.τo[fault_idx]) / 1e6  # MPa
         psi = state.ψ[fault_idx]
@@ -435,7 +485,7 @@ function write_snapshot!(io::HDF5OutputManager, state, mesh, ics, params, config
     n_fault = length(fault_id)
 
     # Compute full fault quantities
-    slip = 2 * state.u[fault_id] .+ params.Vpl * state.time
+    slip = compute_fault_slip_profile(state, fault_id, state.time, params.Vpl)
     slip_rate = state.Vf
     shear_stress = (state.τf .+ ics.τo) ./ 1e6  # MPa
     state_var = state.ψ

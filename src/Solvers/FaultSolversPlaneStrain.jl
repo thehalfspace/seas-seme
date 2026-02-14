@@ -13,7 +13,7 @@ fault-tangential and fault-normal components.
     fault_traction_from_force_plane_strain(force, fault_id, fault_mat,
                                            tangent, normal, ndof)
 
-Compute fault shear traction from internal forces (plane-strain).
+Compute fault shear and normal tractions from internal forces (plane-strain).
 
 # Arguments
 - `force::Vector{T}`: Internal force vector [2*ndof], component-major
@@ -25,6 +25,8 @@ Compute fault shear traction from internal forces (plane-strain).
 
 # Returns
 - `τ_shear::Vector{T}`: Shear traction (tangential) at each fault node
+- `σ_n_perturbation::Vector{T}`: Normal stress perturbation at each fault node
+  (positive = compression increase, consistent with σ̄_n = σ̄_n⁰ + Δσ_n)
 """
 function fault_traction_from_force_plane_strain(
     force::Vector{T},
@@ -36,17 +38,22 @@ function fault_traction_from_force_plane_strain(
 ) where {T<:AbstractFloat}
     nfault = length(fault_id)
     τ_shear = zeros(T, nfault)
+    σ_n_perturbation = zeros(T, nfault)
 
     for i in 1:nfault
         nid = fault_id[i]
         fx = force[nid]
         fy = force[ndof + nid]
 
-        # Project force onto tangent direction and divide by impedance
+        # Project force onto tangent direction and divide by boundary mass
         τ_shear[i] = -(fx * tangent[1, i] + fy * tangent[2, i]) / fault_mat[i]
+
+        # Project force onto normal direction and divide by boundary mass
+        # Sign: positive normal stress = compression (consistent with friction law)
+        σ_n_perturbation[i] = (fx * normal[1, i] + fy * normal[2, i]) / fault_mat[i]
     end
 
-    return τ_shear
+    return τ_shear, σ_n_perturbation
 end
 
 
