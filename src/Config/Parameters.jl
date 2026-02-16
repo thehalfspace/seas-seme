@@ -125,6 +125,7 @@ Physical parameters for the simulation.
 - `formulation::Symbol`: Deformation formulation (:antiplane or :plane_strain)
 - `dip_angle::Float64`: Fault dip angle in degrees (90 = vertical)
 - `poisson_ratio::Float64`: Poisson's ratio ν (only used for plane_strain)
+- `loading_direction::Symbol`: Loading direction (:strike_slip or :dip_slip)
 """
 struct PhysicsConfig
     plate_velocity::Float64
@@ -136,6 +137,7 @@ struct PhysicsConfig
     formulation::Symbol              # :antiplane or :plane_strain
     dip_angle::Float64               # Fault dip angle in degrees (90 = vertical)
     poisson_ratio::Float64           # Poisson's ratio ν (used for plane_strain)
+    loading_direction::Symbol        # :strike_slip or :dip_slip
 end
 
 """

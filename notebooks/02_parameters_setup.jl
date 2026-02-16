@@ -40,7 +40,7 @@ Specify the simulation directory and parameter files location.
 # ╔═╡ aee6645e-f699-4a7c-8a05-46ee0b9fe545
 begin
 	# Set simulation directory
-	simulation_name = "plane_strain_2d"
+	simulation_name = "plane_strain_dipping"
 	base_dir = joinpath(dirname(pwd()), "data")
 	sim_dir = joinpath(base_dir, simulation_name)
 	params_dir = joinpath(sim_dir, "params")
@@ -152,11 +152,9 @@ end
 
 # ╔═╡ 300c13cb-4f04-4a59-8d10-753971620ade
 begin
-	dat = "../data/plane_strain_2d/outputs/plane_strain_2d.h5"
-	out = "../data/strike_slip_2d/slip2.png"
 	plot_slip_contours(data_file,
                  output_file=joinpath(fig_dir, "cumulative_slip.png"),
-                 max_depth=20.0,  # Optional: limit depth
+                 max_depth=40.0,  # Optional: limit depth
 				 dynamic_step=10,
 				 #yreversed=true
 	)

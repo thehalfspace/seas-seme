@@ -146,14 +146,19 @@ function SimulationStatePlaneStrain(mesh::UnstructuredSEMesh{T}, ics, params;
         Vf[i] = 2 * v_tang + params.Vpl
     end
 
-    # Initialize transformed state variable ψ = log(θ*V₀/Lc)
+    # Initialize transformed state variable ψ from BP3-FD eq. 23.
+    # ψ = (a/b) * ln( (2*V₀/V_init) * sinh(τ⁰/(a*σ_n)) ) - f₀/b
+    # This ensures ψ is consistent with τ⁰ and the regularized friction law.
+    # V_init = Vf (initial slip rate) for each node.
     for i in eachindex(ψ)
-        nid = fault_id[i]
-        v_tang = v[nid] * fault_tangent[1, i] + v[ndof + nid] * fault_tangent[2, i]
-        ψ[i] = ics.τo[i] / (ics.σo[i] * ics.friction.b[i]) -
-              params.fo / ics.friction.b[i] -
-              (ics.friction.a[i] / ics.friction.b[i]) *
-              log(2 * v_tang / params.Vo)
+        V_init_i = abs(Vf[i])
+        V_init_i = max(V_init_i, T(1e-20))  # Guard against zero
+        ai = ics.friction.a[i]
+        bi = ics.friction.b[i]
+        σn_i = ics.σo[i]
+        τ0_i = ics.τo[i]
+        ψ[i] = (ai / bi) * log((2 * params.Vo / V_init_i) *
+               sinh(τ0_i / (ai * σn_i))) - params.fo / bi
     end
 
     # Time tracking

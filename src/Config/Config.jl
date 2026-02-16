@@ -98,15 +98,19 @@ end
 Parse physics configuration from TOML dict.
 """
 function parse_physics_config(dict::Dict)::PhysicsConfig
+    ic_type = get(dict["initial_conditions"], "type", "depth_dependent")
     ic_config = InitialConditionsConfig(
-        get(dict["initial_conditions"], "type", "depth_dependent"),
-        dict["initial_conditions"]["velocity_strengthening_shallow"],
+        ic_type,
+        get(dict["initial_conditions"], "velocity_strengthening_shallow", false),
         get(dict["initial_conditions"], "file", nothing)
     )
 
     # Parse formulation (default: antiplane for backward compatibility)
     formulation_str = get(dict, "formulation", "antiplane")
     formulation = Symbol(formulation_str)
+
+    # Parse loading direction (default: strike_slip)
+    loading_direction = Symbol(get(dict, "loading_direction", "strike_slip"))
 
     return PhysicsConfig(
         dict["plate_velocity"],
@@ -117,7 +121,8 @@ function parse_physics_config(dict::Dict)::PhysicsConfig
         ic_config,
         formulation,
         get(dict, "dip_angle", 90.0),
-        get(dict, "poisson_ratio", 0.25)
+        get(dict, "poisson_ratio", 0.25),
+        loading_direction
     )
 end
 
@@ -273,6 +278,19 @@ function validate_config(config::SimulationConfig)
     if config.physics.formulation == :plane_strain
         0 < config.physics.poisson_ratio < 0.5 ||
             error("poisson_ratio must be in (0, 0.5) for plane_strain, got $(config.physics.poisson_ratio)")
+    end
+    config.physics.loading_direction in (:strike_slip, :dip_slip) ||
+        error("loading_direction must be :strike_slip or :dip_slip, got $(config.physics.loading_direction)")
+    if config.physics.loading_direction == :dip_slip
+        config.physics.formulation == :plane_strain ||
+            error("dip_slip loading requires plane_strain formulation")
+    end
+    config.physics.initial_conditions.type in ("depth_dependent", "csv") ||
+        error("initial_conditions.type must be 'depth_dependent' or 'csv', got '$(config.physics.initial_conditions.type)'")
+    if config.physics.initial_conditions.type == "csv"
+        ic_file = config.physics.initial_conditions.file
+        isnothing(ic_file) && error("CSV initial conditions require 'file' path in [physics.initial_conditions]")
+        isfile(ic_file) || error("Initial conditions CSV file not found: $ic_file")
     end
 
     # Solver validation

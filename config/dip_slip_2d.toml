@@ -1,28 +1,28 @@
-# SEAS-SEME Configuration: 2D Plane-Strain Earthquake Cycle Simulation
+# SEAS-SEME Configuration: 2D Dip-Slip Earthquake Cycle Simulation
 #
-# Same benchmark geometry as strike_slip_2d.toml but using plane-strain
-# formulation with P-SV waves (2 displacement components).
+# Plane-strain formulation with 60° dipping fault and dip-slip loading.
+# Same material and friction parameters as plane_strain_2d.toml.
 
 [constants]
 yr2sec = 31557600.0                 # Seconds per year (365.25 * 24 * 3600)
 day2sec = 86400.0                   # Seconds per day (24 * 3600)
 
 [simulation]
-name = "plane_strain_dipping"
+name = "dip_slip_2d"
 total_time_years = 230.0             # Total simulation time in years
 output_dir = "./data"               # Base output directory
 
 [mesh]
-#file = "./data/mesh/homogeneous_lowres/homogeneous.mesh"
 file = "./data/mesh/dipping_fault_60/dipping_fault.mesh"
+#file = "./data/mesh/homogeneous_lowres/homogeneous.mesh"
 polynomial_degree = 4               # Spectral element polynomial degree (p=4)
 
 [physics]
-# Deformation formulation: plane_strain gives 2-component (u_x, u_y) displacement
+# Deformation formulation: plane_strain with dip-slip loading
 formulation = "plane_strain"
-dip_angle = 60.0                    # Fault dip angle in degrees (90 = vertical)
+dip_angle = 60.0                    # Fault dip angle in degrees
+loading_direction = "dip_slip"      # Dip-slip: Vpl decomposed to fault-tangential component
 poisson_ratio = 0.25                # Poisson's ratio ν
-loading_direction = "dip_slip"      # comment out for strike slip
 
 # Material properties
 density = 2670.0                    # Density (kg/m³)
@@ -30,7 +30,7 @@ shear_velocity = 3464.0             # Shear wave velocity (m/s)
 # Derived: P-wave velocity ≈ 6000 m/s, Shear modulus ≈ 32 GPa
 
 # Plate loading and friction
-plate_velocity = 1.11e-9            # 35 mm/yr in m/s
+plate_velocity = 2.0e-9             # Horizontal convergence rate; V_tangential = V_p * cos(dip) = 1e-9 m/s (BP3)
 reference_friction = 0.6            # Reference friction coefficient fo
 reference_slip_rate = 1.0e-6        # Reference slip rate Vo (m/s)
 

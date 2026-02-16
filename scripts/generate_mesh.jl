@@ -126,6 +126,11 @@ function parse_commandline()
             help = "Number of mesh smoothing iterations (ignored if using config)"
             arg_type = Int
             default = 50
+
+        "--dip-angle"
+            help = "Fault dip angle in degrees (90 = vertical, ignored if using config)"
+            arg_type = Float64
+            default = 90.0
     end
 
     return parse_args(s)
@@ -149,7 +154,8 @@ function load_mesh_params_from_toml(config_file::String)
             fault_refinement_h = config["meshing"]["fault_refinement_h"],
             fault_refinement_width = config["meshing"]["fault_refinement_width"],
             polynomial_order = config["meshing"]["polynomial_order"],
-            smoothing_iterations = config["meshing"]["smoothing_iterations"]
+            smoothing_iterations = config["meshing"]["smoothing_iterations"],
+            dip_angle = get(config["fault"], "dip_angle", 90.0)
         )
 
         output_config = get(config, "output", Dict())
@@ -198,7 +204,8 @@ function main()
             fault_refinement_h = args["refine"],
             fault_refinement_width = args["refine-width"],
             polynomial_order = args["order"],
-            smoothing_iterations = args["smooth"]
+            smoothing_iterations = args["smooth"],
+            dip_angle = args["dip-angle"]
         )
 
         # Use default output directory for direct mode
@@ -215,6 +222,7 @@ function main()
     println("Mesh Configuration:")
     println("  Domain size:           $(params.Lx/1e3) × $(params.Ly/1e3) km")
     println("  Fault start:           y = $(params.fault_start_y/1e3) km")
+    println("  Dip angle:             $(params.dip_angle)°")
     println("  Background elem size:  $(params.background_grid_size/1e3) km")
     println("  Fault refinement:      $(params.fault_refinement_h/1e3) km")
     println("  Refinement width:      $(params.fault_refinement_width/1e3) km")

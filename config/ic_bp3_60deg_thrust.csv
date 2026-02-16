@@ -1,0 +1,13 @@
+# SEAS BP3 Initial Conditions - 60 degree thrust fault
+# Columns: down-dip distance x_d (m), a, b, Lc (m), sigma_n (Pa)
+# tau0 and psi computed from steady-state friction law at V_init
+# Reference: Erickson et al. (2023), SEAS BP3
+# Zones:
+#   x_d in [0, 15000]: velocity weakening (a=0.010 < b=0.015)
+#   x_d in [15000, 18000]: linear transition a: 0.010 -> 0.025
+#   x_d in [18000, 40000]: velocity strengthening (a=0.025 > b=0.015)
+x_d,a,b,Lc,sigma_n
+0.0,0.010,0.015,0.008,50.0e6
+15000.0,0.010,0.015,0.008,50.0e6
+18000.0,0.025,0.015,0.008,50.0e6
+40000.0,0.025,0.015,0.008,50.0e6

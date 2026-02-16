@@ -124,16 +124,19 @@ function SimulationState(mesh::UnstructuredSEMesh{T}, ics, params;
     # Initialize fault slip rate
     Vf .= 2 .* v[fault_id] .+ params.Vpl
 
-    # Initialize transformed state variable ψ = log(θ*V₀/Lc)
-    # From steady-state rate-state friction:
-    # τ/σ = f₀ + a*log(V/V₀) + b*log(θ*V₀/Lc)
-    # Solving for ψ = log(θ*V₀/Lc):
-    # ψ = (τ/(σ*b)) - (f₀/b) - (a/b)*log(V/V₀)
+    # Initialize transformed state variable ψ from BP3-FD eq. 23.
+    # ψ = (a/b) * ln( (2*V₀/V_init) * sinh(τ⁰/(a*σ_n)) ) - f₀/b
+    # This uses the regularized friction law and ensures ψ is consistent
+    # with τ⁰ at the initial slip rate.
     for i in eachindex(ψ)
-        ψ[i] = ics.τo[i] / (ics.σo[i] * ics.friction.b[i]) -
-              params.fo / ics.friction.b[i] -
-              (ics.friction.a[i] / ics.friction.b[i]) *
-              log(2 * v[fault_id[i]] / params.Vo)
+        V_init_i = abs(Vf[i])
+        V_init_i = max(V_init_i, T(1e-20))  # Guard against zero
+        ai = ics.friction.a[i]
+        bi = ics.friction.b[i]
+        σn_i = ics.σo[i]
+        τ0_i = ics.τo[i]
+        ψ[i] = (ai / bi) * log((2 * params.Vo / V_init_i) *
+               sinh(τ0_i / (ai * σn_i))) - params.fo / bi
     end
 
     # Time tracking

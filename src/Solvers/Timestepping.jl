@@ -117,9 +117,11 @@ function compute_timestep(fault_V::Vector{T},
             end
         end
 
-        # Enforce minimum timestep
-        if dt_new < timestepper.dt_min
-            dt_new = timestepper.dt_min
+        # Enforce minimum QS timestep (10x CFL) to prevent velocity spike
+        # from v = du/dt amplification when dt is tiny at dynamic→QS transition
+        dt_min_qs = T(10) * timestepper.dt_min
+        if dt_new < dt_min_qs
+            dt_new = dt_min_qs
         end
 
         # Gradual timestep increase (no more than dt_incf * current)

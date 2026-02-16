@@ -87,13 +87,17 @@ function state_time_evolution(ψ_old::T, V::T, dt::T, Lc::T, V₀::T) where T<:R
         error("Time step must be non-negative, got dt=$dt")
     end
 
-    Vdt_L = abs(V) * dt / Lc
+    # Clamp slip rate to physical bounds before state evolution
+    # |V| > vs (~3500 m/s) is unphysical; use a generous bound
+    V_clamped = clamp(V, T(-1e4), T(1e4))
+
+    Vdt_L = abs(V_clamped) * dt / Lc
 
     if Vdt_L < V₀
         # Small slip regime
         # Clamp exponential argument to prevent overflow
         exp_arg = clamp(ψ_old - Vdt_L, T(-700), T(700))
-        log_arg = exp(exp_arg) + V₀ * dt / Lc - 0.5 * V₀ * abs(V) * dt^2 / Lc^2
+        log_arg = exp(exp_arg) + V₀ * dt / Lc - 0.5 * V₀ * abs(V_clamped) * dt^2 / Lc^2
 
         # Ensure log argument is positive
         if log_arg <= 0
@@ -101,13 +105,16 @@ function state_time_evolution(ψ_old::T, V::T, dt::T, Lc::T, V₀::T) where T<:R
             return ψ_old  # Return previous state as fallback
         end
 
-        return log(log_arg)
+        # Clamp ψ to physical bounds: ψ ∈ [-20, 30]
+        # ψ = -20 → V/V₀ ~ e^20 ~ 5e8 (way beyond seismic)
+        # ψ = +30 → V/V₀ ~ e^-30 ~ 1e-13 (fully locked)
+        return clamp(log(log_arg), T(-20), T(30))
     else
         # Large slip regime
         exp_arg1 = clamp(ψ_old - Vdt_L, T(-700), T(700))
         exp_arg2 = clamp(-Vdt_L, T(-700), T(700))
 
-        log_arg = exp(exp_arg1) + (V₀ / abs(V)) * (1 - exp(exp_arg2))
+        log_arg = exp(exp_arg1) + (V₀ / abs(V_clamped)) * (1 - exp(exp_arg2))
 
         # Ensure log argument is positive
         if log_arg <= 0
@@ -115,7 +122,7 @@ function state_time_evolution(ψ_old::T, V::T, dt::T, Lc::T, V₀::T) where T<:R
             return ψ_old  # Return previous state as fallback
         end
 
-        return log(log_arg)
+        return clamp(log(log_arg), T(-20), T(30))
     end
 end
 
@@ -195,15 +202,9 @@ function nr_search(τ_guess::T, f₀::T, V₀::T, a::T, b::T, σ_n::T,
         # Check for divergence or NaN
         if !isfinite(τ) || !isfinite(δ) || abs(δ) > 1e10 || iter >= max_iter
             @warn "NR search failed to converge" iter δ tol τ V σ_n a b ψ fault_z fault_vfree
-            # Recompute final slip rate with clamping
-            fa = fact * τ / (σ_n * a)
-            help = -(f₀ + b * ψ) / a
-            arg_plus = clamp(help + fa, -max_exp_arg, max_exp_arg)
-            arg_minus = clamp(help - fa, -max_exp_arg, max_exp_arg)
-            help1 = exp(arg_plus)
-            help2 = exp(arg_minus)
-            V = V₀ * (help1 - help2)
-            return V, τ
+            # Return safe fallback: previous slip rate and initial stress
+            # instead of diverged garbage values
+            return fault_vfree, τ_init
         end
     end
 

@@ -36,19 +36,15 @@ function build_initial_conditions_plane_strain(
     mesh::UnstructuredSEMesh{T},
     dip_angle::Float64
 ) where {T<:AbstractFloat}
-    # For Phase 1 (vertical fault), the IC generation is identical to antiplane.
-    # The dip_angle is validated but doesn't change the depth-zone logic since
-    # depth is always vertical.
-    #
-    # In Phase 2, for dipping faults, the mesh will have fault nodes at the
-    # correct (x,y) positions, and depth = |y - y_surface| is still correct.
-
     @info "Building plane-strain initial conditions (dip_angle = $(dip_angle)°)"
 
-    # Delegate to the existing depth-dependent IC builder
-    # This works because:
-    # 1. The depth zones use vertical depth from surface
-    # 2. The fault node y-coordinates correctly give vertical position
-    # 3. The rate-state parameters are independent of formulation
-    return build_initial_conditions(config, mesh)
+    if config.initial_conditions.type == "csv"
+        csv_path = config.initial_conditions.file
+        isnothing(csv_path) && error("CSV initial conditions require 'file' path in [physics.initial_conditions]")
+        @info "  Using CSV-based initial conditions: $csv_path"
+        return build_initial_conditions_from_csv(csv_path, mesh, config, dip_angle)
+    else
+        # Default: depth-dependent hardcoded zones (backward compatible)
+        return build_initial_conditions(config, mesh)
+    end
 end

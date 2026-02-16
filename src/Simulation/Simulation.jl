@@ -197,8 +197,14 @@ function build_simulation_antiplane(config::SimulationConfig; T::Type=Float64)
 
     # 8. Initialize simulation state
     println("\n[8/8] Initializing simulation state...")
-    state = SimulationState(mesh, ics, params, v_init=T(5.0e-4))
-    @printf("  Simulation state initialized\n")
+    # For CSV ICs: v_init = Vpl/2 so that Vf = 2*v_init = Vpl (steady state).
+    v_init_val = if config.physics.initial_conditions.type == "csv"
+        T(params.Vpl) / 2
+    else
+        T(5.0e-4)
+    end
+    state = SimulationState(mesh, ics, params, v_init=v_init_val)
+    @printf("  Simulation state initialized (v_init = %.3e m/s)\n", v_init_val)
     @printf("  Initial max slip rate: %.3e m/s\n", maximum_fault_slip_rate(state))
 
     # 9. Save initial parameters
@@ -303,8 +309,20 @@ function build_simulation_plane_strain(config::SimulationConfig; T::Type=Float64
 
     # 5. Generate initial conditions
     println("\n[5/9] Generating initial conditions...")
+
+    # Compute effective plate velocity based on loading direction
+    Vpl_raw = config.physics.plate_velocity
+    Vpl_eff = if config.physics.loading_direction == :dip_slip
+        Vpl_raw * cosd(config.physics.dip_angle)
+    else  # :strike_slip
+        Vpl_raw
+    end
+    @printf("  Loading direction: %s\n", config.physics.loading_direction)
+    @printf("  Plate velocity (raw): %.3e m/s\n", Vpl_raw)
+    @printf("  Plate velocity (effective tangential): %.3e m/s\n", Vpl_eff)
+
     params = (
-        Vpl = T(config.physics.plate_velocity),
+        Vpl = T(Vpl_eff),
         Vo = T(config.physics.reference_slip_rate),
         fo = T(config.physics.reference_friction),
         yr2sec = T(365.25 * 24 * 3600)
@@ -357,8 +375,17 @@ function build_simulation_plane_strain(config::SimulationConfig; T::Type=Float64
 
     # 8. Initialize simulation state
     println("\n[8/9] Initializing simulation state...")
-    state = SimulationStatePlaneStrain(mesh, ics, params, v_init=T(5.0e-4))
-    @printf("  Plane-strain simulation state initialized\n")
+    # For CSV-based ICs, τ⁰ is computed at steady-state V = Vpl, so the initial
+    # slip rate must also be Vpl for consistency. v_init is the half-rate:
+    # Vf = 2*v_init, so v_init = Vpl/2 gives Vf = Vpl (steady state).
+    # For depth-dependent ICs, the warm-start v_init=5e-4 is retained.
+    v_init_val = if config.physics.initial_conditions.type == "csv"
+        T(Vpl_eff) / 2
+    else
+        T(5.0e-4)
+    end
+    state = SimulationStatePlaneStrain(mesh, ics, params, v_init=v_init_val)
+    @printf("  Plane-strain simulation state initialized (v_init = %.3e m/s)\n", v_init_val)
     @printf("  Initial max slip rate: %.3e m/s\n", maximum_fault_slip_rate(state))
 
     # 9. Save initial parameters
@@ -384,7 +411,7 @@ function build_simulation_plane_strain(config::SimulationConfig; T::Type=Float64
     println("└── checkpoints/")
     println("\nMesh: $(config.mesh.file)")
     println("  $(mesh.n_elements) elements, polynomial degree $(mesh.polynomial_degree)")
-    println("  Formulation: plane-strain, dip angle: $(config.physics.dip_angle)°")
+    println("  Formulation: plane-strain, dip angle: $(config.physics.dip_angle)°, loading: $(config.physics.loading_direction)")
     println("="^80)
 
     return Simulation(

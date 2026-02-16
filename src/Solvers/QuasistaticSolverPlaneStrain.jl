@@ -155,10 +155,20 @@ function quasistatic_step!(state::SimulationStatePlaneStrain{T},
 
         state.u[solver.stiffness_op.fltni] .= u_sol
 
+        niter = length(history[:resnorm]) - 1
+        converged = history.isconverged
         if solver.verbose && (state.iteration <= 10 || mod(state.iteration, 500) == 0)
-            niter = length(history[:resnorm]) - 1
-            converged = history.isconverged
             println("  PS-QS CG iterations: $niter, converged: $converged")
+        end
+
+        # CG diagnostics: track residual and solution norms
+        Vf_max_cg = maximum(abs.(Vf_new))
+        if pass == 2 && (state.iteration <= 5 || mod(state.iteration, 100) == 0 || Vf_max_cg > 10 * params.Vpl)
+            rhs_norm = sqrt(sum(rhs .^ 2))
+            usol_norm = sqrt(sum(u_sol .^ 2))
+            final_res = history[:resnorm][end]
+            println("  CG diag iter=$(state.iteration): rhs_norm=$rhs_norm, usol_norm=$usol_norm, ",
+                    "final_resnorm=$final_res, niter=$niter, converged=$converged")
         end
 
         if any(isnan.(u_sol)) || any(isinf.(u_sol))
@@ -192,6 +202,26 @@ function quasistatic_step!(state::SimulationStatePlaneStrain{T},
         )
         state.τf .= τf_new
         state.σn_perturbation .= σn_pert
+
+        # Per-iteration diagnostics (pass 2 only)
+        # Log: first 10, every 100th, and when Vf exceeds 10x plate rate (nucleation onset)
+        Vf_max_diag = maximum(abs.(Vf_new))
+        if pass == 2 && (state.iteration <= 10 || mod(state.iteration, 100) == 0 || Vf_max_diag > 10 * params.Vpl)
+            # Compute force projections at fault before division by fault_matrix
+            fx_fault = state.a[fault_id]
+            fy_fault = state.a[ndof .+ fault_id]
+            force_tang = fx_fault .* tangent[1, :] .+ fy_fault .* tangent[2, :]
+            force_norm = fx_fault .* state.fault_normal[1, :] .+ fy_fault .* state.fault_normal[2, :]
+            println("PS-QS iter=$(state.iteration) pass=$pass: ",
+                    "u_max=$(maximum(abs.(state.u))), ",
+                    "τf_range=[$(minimum(state.τf)), $(maximum(state.τf))], ",
+                    "Vf_range=[$(minimum(Vf_new)), $(maximum(Vf_new))], ",
+                    "ψ_range=[$(minimum(state.ψ)), $(maximum(state.ψ))], ",
+                    "force_tang_max=$(maximum(abs.(force_tang))), ",
+                    "force_norm_max=$(maximum(abs.(force_norm))), ",
+                    "fault_mat_range=[$(minimum(fault_matrix)), $(maximum(fault_matrix))], ",
+                    "dt=$dt")
+        end
 
         # Steps 4 & 5: Update state variable and slip rate
         for i in eachindex(fault_id)
@@ -228,11 +258,36 @@ function quasistatic_step!(state::SimulationStatePlaneStrain{T},
     # Update global velocity from displacement change
     state.v .= (state.u .- state.u_prev) ./ dt
 
+    # Safety: clamp velocity to physical bounds (shear wave velocity)
+    # Prevents unphysical spikes from CG errors amplified by small dt
+    clamp!(state.v, -physics.vs, physics.vs)
+
     # Re-enforce boundary velocities
     set_fault_velocity_plane_strain!(state.v, fault_id, Vf_new, params.Vpl,
                                      tangent, ndof)
     state.v[creep_id] .= 0
     state.v[ndof .+ creep_id] .= 0
+
+    # Diagnostic: check for blowup
+    v_max = maximum(abs.(state.v))
+    u_max = maximum(abs.(state.u))
+    if v_max > 1e10 || u_max > 1e10
+        # Compute force breakdown from state.a (still holds K*u from pass 2)
+        fx_fault = state.a[fault_id]
+        fy_fault = state.a[ndof .+ fault_id]
+        force_tang = fx_fault .* tangent[1, :] .+ fy_fault .* tangent[2, :]
+        force_norm = fx_fault .* state.fault_normal[1, :] .+ fy_fault .* state.fault_normal[2, :]
+        @error "PS-QS blowup detected" v_max u_max dt iteration=state.iteration
+        @error "  Vf stats" Vf_min=minimum(Vf_new) Vf_max=maximum(Vf_new)
+        @error "  τf stats" τf_min=minimum(state.τf) τf_max=maximum(state.τf)
+        @error "  ψ stats" ψ_min=minimum(state.ψ) ψ_max=maximum(state.ψ)
+        @error "  σn_pert stats" σn_min=minimum(state.σn_perturbation) σn_max=maximum(state.σn_perturbation)
+        @error "  force_tang stats" ft_min=minimum(force_tang) ft_max=maximum(force_tang)
+        @error "  force_norm stats" fn_min=minimum(force_norm) fn_max=maximum(force_norm)
+        @error "  fault_matrix stats" fm_min=minimum(fault_matrix) fm_max=maximum(fault_matrix)
+        @error "  IC stress" τo_range=[minimum(ics.τo), maximum(ics.τo)] σo_range=[minimum(ics.σo), maximum(ics.σo)]
+        error("Quasistatic solver produced non-physical values")
+    end
 
     # Zero prescribed boundary accelerations
     fill!(state.a, zero(T))

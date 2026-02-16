@@ -15,6 +15,7 @@ Ly = 40.0e3                    # Domain height (40 km)
 # Fault geometry (meters)
 start_y = 20.0e3               # Y-coordinate where fault begins (20 km)
                                # Fault extends from start_y to Ly on right edge
+dip_angle = 90.0               # Fault dip angle in degrees (90 = vertical)
 
 [meshing]
 # Element sizing (meters)

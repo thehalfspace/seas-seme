@@ -52,6 +52,7 @@ Configuration parameters for unstructured mesh generation.
 - `fault_refinement_width::Float64`: Width of refinement zone around fault (meters)
 - `polynomial_order::Int`: Polynomial degree for spectral elements (default: 4)
 - `smoothing_iterations::Int`: Number of mesh smoothing iterations (default: 50)
+- `dip_angle::Float64`: Fault dip angle in degrees (90 = vertical, default: 90.0)
 """
 struct MeshParameters
     Lx::Float64
@@ -62,6 +63,7 @@ struct MeshParameters
     fault_refinement_width::Float64
     polynomial_order::Int
     smoothing_iterations::Int
+    dip_angle::Float64
 end
 
 """
@@ -78,6 +80,7 @@ Construct mesh parameters with keyword arguments.
 - `fault_refinement_width=2.0e3`: Width of refinement zone (meters)
 - `polynomial_order=4`: Polynomial degree
 - `smoothing_iterations=50`: Smoothing iterations
+- `dip_angle=90.0`: Fault dip angle in degrees (90 = vertical)
 
 # Example
 ```julia
@@ -86,7 +89,8 @@ params = MeshParameters(
     Ly=40.0e3,
     fault_start_y=20.0e3,
     background_grid_size=2.0e3,
-    fault_refinement_h=0.2e3
+    fault_refinement_h=0.2e3,
+    dip_angle=60.0
 )
 ```
 """
@@ -98,7 +102,8 @@ function MeshParameters(;
     fault_refinement_h::Float64 = 0.2e3,
     fault_refinement_width::Float64 = 2.0e3,
     polynomial_order::Int = 4,
-    smoothing_iterations::Int = 50
+    smoothing_iterations::Int = 50,
+    dip_angle::Float64 = 90.0
 )
     MeshParameters(
         Lx, Ly, fault_start_y,
@@ -106,7 +111,8 @@ function MeshParameters(;
         fault_refinement_h,
         fault_refinement_width,
         polynomial_order,
-        smoothing_iterations
+        smoothing_iterations,
+        dip_angle
     )
 end
 
@@ -134,6 +140,24 @@ create_control_file(params, "mesh.control")
 ```
 """
 function create_control_file(params::MeshParameters, control_file_path::String)
+    δ = params.dip_angle
+    Lx = params.Lx
+    Ly = params.Ly
+    fy = params.fault_start_y
+
+    # Compute boundary vertex coordinates for dipping fault geometry
+    # For δ=90°: x_b = Lx, x_t = Lx (rectangular domain, recovers current geometry)
+    # For δ<90°: domain becomes a pentagon with dipping right edge
+    if δ == 90.0
+        x_b = Lx
+        x_t = Lx
+    else
+        δ_rad = deg2rad(δ)
+        x_b = Lx - Ly / tan(δ_rad)
+        x_t = Lx - (Ly - fy) / tan(δ_rad)
+        x_b > 0 || error("Domain too narrow for dip angle $(δ)°: need Lx > Ly/tan(δ) = $(Ly/tan(δ_rad)/1e3) km, got Lx = $(Lx/1e3) km")
+    end
+
     open(control_file_path, "w") do io
         # Write control file in the exact format that works
         println(io, "\t\t\\begin{CONTROL_INPUT}")
@@ -158,8 +182,8 @@ function create_control_file(params::MeshParameters, control_file_path::String)
         println(io, "\t\t\t\\begin{REFINEMENT_REGIONS}")
         println(io, "\t\t\t\\begin{REFINEMENT_LINE}")
         println(io, "\t\t\t\ttype = smooth")
-        println(io, "\t\t\t\tx0   = [$(params.Lx),$(params.fault_start_y),0.0]")
-        println(io, "\t\t\t\tx1   = [$(params.Lx),$(params.Ly),0.0]")
+        println(io, "\t\t\t\tx0   = [$(x_t),$(fy),0.0]")
+        println(io, "\t\t\t\tx1   = [$(Lx),$(Ly),0.0]")
         println(io, "\t\t\t\th    = $(params.fault_refinement_h)")
         println(io, "\t\t\t\tw    = $(params.fault_refinement_width)")
         println(io, "\t\t\t\\end{REFINEMENT_LINE}")
@@ -168,31 +192,42 @@ function create_control_file(params::MeshParameters, control_file_path::String)
         println(io, "\t\t")
         println(io, "\t\t\\begin{MODEL}")
         println(io, "\t\t\t\\begin{OUTER_BOUNDARY}")
+
+        # Segment 1: bottom absorbing — (0,0) → (x_b, 0)
         println(io, "\t\t\t\\begin{END_POINTS_LINE}")
         println(io, "\t\t\t\tname = absorbing ")
         println(io, "\t\t\t\txStart = [0.0,0.0,0.0]")
-        println(io, "\t\t\t\txEnd   = [$(params.Lx),0.0,0.0]")
+        println(io, "\t\t\t\txEnd   = [$(x_b),0.0,0.0]")
         println(io, "\t\t\t\\end{END_POINTS_LINE}")
+
+        # Segment 2: creep — (x_b, 0) → (x_t, fy)
         println(io, "\t\t\t\\begin{END_POINTS_LINE}")
         println(io, "\t\t\t\tname = creep")
-        println(io, "\t\t\t\txStart = [$(params.Lx),0.0,0.0]")
-        println(io, "\t\t\t\txEnd   = [$(params.Lx),$(params.fault_start_y),0.0]")
+        println(io, "\t\t\t\txStart = [$(x_b),0.0,0.0]")
+        println(io, "\t\t\t\txEnd   = [$(x_t),$(fy),0.0]")
         println(io, "\t\t\t\\end{END_POINTS_LINE}")
+
+        # Segment 3: fault — (x_t, fy) → (Lx, Ly)
         println(io, "\t\t\t\\begin{END_POINTS_LINE}")
         println(io, "\t\t\t\tname = fault")
-        println(io, "\t\t\t\txStart = [$(params.Lx),$(params.fault_start_y),0.0]")
-        println(io, "\t\t\t\txEnd   = [$(params.Lx),$(params.Ly),0.0]")
+        println(io, "\t\t\t\txStart = [$(x_t),$(fy),0.0]")
+        println(io, "\t\t\t\txEnd   = [$(Lx),$(Ly),0.0]")
         println(io, "\t\t\t\\end{END_POINTS_LINE}")
+
+        # Segment 4: free surface — (Lx, Ly) → (0, Ly)
         println(io, "\t\t\t\\begin{END_POINTS_LINE}")
         println(io, "\t\t\t\tname = free_surface")
-        println(io, "\t\t\t\txStart = [$(params.Lx),$(params.Ly),0.0]")
-        println(io, "\t\t\t\txEnd   = [0.0,$(params.Ly),0.0]")
+        println(io, "\t\t\t\txStart = [$(Lx),$(Ly),0.0]")
+        println(io, "\t\t\t\txEnd   = [0.0,$(Ly),0.0]")
         println(io, "\t\t\t\\end{END_POINTS_LINE}")
+
+        # Segment 5: left absorbing — (0, Ly) → (0, 0)
         println(io, "\t\t\t\\begin{END_POINTS_LINE}")
         println(io, "\t\t\t\tname = absorbing ")
-        println(io, "\t\t\t\txStart = [0.0,$(params.Ly),0.0]")
+        println(io, "\t\t\t\txStart = [0.0,$(Ly),0.0]")
         println(io, "\t\t\t\txEnd   = [0.0,0.0,0.0]")
         println(io, "\t\t\t\\end{END_POINTS_LINE}")
+
         println(io, "\t\t\t\\end{OUTER_BOUNDARY}")
         println(io, "\t\t\\end{MODEL}")
         println(io, "\t\t\\end{FILE}")
@@ -255,6 +290,7 @@ function generate_unstructured_mesh(
     @info "Generating mesh with HOHQMesh..."
     @info "  Domain: $(params.Lx/1e3) × $(params.Ly/1e3) km"
     @info "  Fault location: y = $(params.fault_start_y/1e3) km"
+    @info "  Dip angle: $(params.dip_angle)°"
     @info "  Background element size: $(params.background_grid_size/1e3) km"
     @info "  Fault refinement: $(params.fault_refinement_h/1e3) km"
     @info "  Polynomial order: $(params.polynomial_order)"

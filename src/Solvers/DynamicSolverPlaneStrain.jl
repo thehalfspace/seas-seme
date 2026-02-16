@@ -122,6 +122,9 @@ function dynamic_step!(state::SimulationStatePlaneStrain{T},
         # σn_eff = ics.σo[i] + state.σn_perturbation[i]
         σn_eff = ics.σo[i]
 
+        # Save ψ before update so we can restore on NR failure
+        ψ_saved = state.ψ[i]
+
         # Update state variable
         state.ψ[i] = state_time_evolution(state.ψ[i], Vf_prev[i], dt,
                                          ics.friction.Lc[i], params.Vo)
@@ -139,20 +142,34 @@ function dynamic_step!(state::SimulationStatePlaneStrain{T},
         )
 
         if isnan(state.Vf[i]) || isnan(state.τf[i])
-            @error "NR search failed (plane-strain)" location=i iter=state.iteration
-            error("Newton-Raphson search failed to converge")
+            # NR failed completely — restore ψ and use previous slip rate
+            state.ψ[i] = ψ_saved
+            state.Vf[i] = Vf_prev[i]
+            state.τf[i] = τ_total_guess - ics.τo[i]
+            @warn "NR search produced NaN (plane-strain), restoring previous state" location=i iter=state.iteration
+            continue
         end
 
         # 2nd iteration with average slip rate
+        ψ_after_first = state.ψ[i]
         avg_slip_rate = T(0.5) * (state.Vf[i] + Vf_first_iter[i])
         state.ψ[i] = state_time_evolution(state.ψ[i], avg_slip_rate, dt,
                                          ics.friction.Lc[i], params.Vo)
 
-        state.Vf[i], state.τf[i] = nr_search(
+        Vf_2nd, τf_2nd = nr_search(
             state.τf[i], params.fo, params.Vo,
             ics.friction.a[i], ics.friction.b[i], σn_eff,
             ics.τo[i], state.ψ[i], fault_z[i], state.fault_vfree[i]
         )
+
+        if isnan(Vf_2nd) || isnan(τf_2nd)
+            # 2nd NR failed — keep 1st iteration results and restore ψ
+            state.ψ[i] = ψ_after_first
+            @warn "NR 2nd iteration produced NaN, keeping 1st iteration result" location=i
+        else
+            state.Vf[i] = Vf_2nd
+            state.τf[i] = τf_2nd
+        end
     end
 
     # Convert to perturbation stress
