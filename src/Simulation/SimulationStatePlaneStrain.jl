@@ -161,6 +161,17 @@ function SimulationStatePlaneStrain(mesh::UnstructuredSEMesh{T}, ics, params;
                sinh(τ0_i / (ai * σn_i))) - params.fo / bi
     end
 
+    # Enforce excluded fault nodes to plate rate (Vf = Vpl → v = 0)
+    mask = mesh.active_fault_mask
+    for i in 1:nfault
+        if !mask[i]
+            Vf[i] = params.Vpl
+            nid = fault_id[i]
+            v[nid]        = zero(T)
+            v[ndof + nid] = zero(T)
+        end
+    end
+
     # Time tracking
     time = zero(T)
     timestep = zero(T)

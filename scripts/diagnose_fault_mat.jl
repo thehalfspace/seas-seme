@@ -105,5 +105,22 @@ println("  Corner shared (2 elem): $(2 * basis.weights[1] * h_fault/2)")
 println("  Corner unshared (1 elem): $(basis.weights[1] * h_fault/2)")
 println("  Interior (1 elem): $(maximum(basis.weights) * h_fault/2)")
 
+# Active fault mask
+mask = mesh.active_fault_mask
+n_active = count(mask)
+n_excluded = count(!, mask)
+println("\n--- Active fault mask ---")
+println("  Active: $n_active / $(length(mask))")
+println("  Excluded: $n_excluded")
+if n_excluded > 0
+    println("  Excluded nodes:")
+    for i in eachindex(fault.node_ids)
+        if !mask[i]
+            x, y = fault.coords[1,i], fault.coords[2,i]
+            println("    [$i] node_id=$(fault.node_ids[i]), fault_mat=$(fm[i]), coords=($x, $y)")
+        end
+    end
+end
+
 println("\n" * "="^60)
 println("Done.")

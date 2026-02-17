@@ -154,10 +154,33 @@ end
 begin
 	plot_slip_contours(data_file,
                  output_file=joinpath(fig_dir, "cumulative_slip.png"),
-                 max_depth=40.0,  # Optional: limit depth
 				 dynamic_step=10,
 				 #yreversed=true
 	)
+end
+
+# ╔═╡ dabb56ff-65dc-48a9-b061-39615f6ba0b1
+begin
+	# Read all snapshot data
+	times, slip, slip_rate, stress, state, depths_km = read_snapshots("../data/strike_slip_2d/outputs/strike_slip_2d.h5")
+
+	config = get_snapshot_config("../data/strike_slip_2d/outputs/strike_slip_2d.h5")
+end
+
+
+# ╔═╡ d51cc2b3-8457-4ecd-aa2a-27f977285326
+depths_km
+
+# ╔═╡ b697b655-8aa5-42e9-aeb7-f81e20970676
+begin
+	figsize = (800, 600)
+	fig = Figure(resolution=figsize)
+	x1 = Axis(fig[1, 1],
+			  xlabel="skup",
+			  ylabel="Depth (km)",
+			  title="slip")
+	plot!(slip)
+	fig
 end
 
 # ╔═╡ fa9df7ba-e4b6-4d96-9f57-205c3966e234
@@ -181,4 +204,7 @@ Key statistics about the simulation parameters.
 # ╠═95dd971d-0f49-4880-a623-ccc5242a959b
 # ╠═0135772b-4ba6-435f-b2fb-abfcb573fe06
 # ╠═300c13cb-4f04-4a59-8d10-753971620ade
+# ╠═dabb56ff-65dc-48a9-b061-39615f6ba0b1
+# ╠═d51cc2b3-8457-4ecd-aa2a-27f977285326
+# ╠═b697b655-8aa5-42e9-aeb7-f81e20970676
 # ╟─fa9df7ba-e4b6-4d96-9f57-205c3966e234

@@ -35,6 +35,7 @@ Complete spectral element mesh with geometry, connectivity, and boundaries.
 - `normal_dirs::Array{T,4}`: Normal vectors [2, nnodes, 4, nelements]
 - `boundaries::BoundaryInfo{T}`: Boundary node information
 - `face_map::FaceMap`: Face abstraction (single source of truth for faces)
+- `active_fault_mask::BitVector`: Which fault nodes participate in friction (true=active)
 - `ndof::Int`: Total number of global DOFs
 - `n_elements::Int`: Number of elements
 - `polynomial_degree::Int`: Polynomial degree (p)
@@ -48,6 +49,7 @@ struct UnstructuredSEMesh{T<:AbstractFloat}
     normal_dirs::Array{T,4}
     boundaries::BoundaryInfo{T}
     face_map::FaceMap
+    active_fault_mask::BitVector
     ndof::Int
     n_elements::Int
     polynomial_degree::Int
@@ -238,6 +240,22 @@ function build_mesh(config::MeshConfig, physics::PhysicsConfig)::UnstructuredSEM
 
     @info "Boundary nodes: fault=$(length(fault_ids)), creep=$(length(creep_ids)), absorbing=$(length(absorb_ids))"
 
+    # Compute active fault mask: exclude endpoint nodes with pathological fault_mat
+    # Criterion 1: nodes shared between fault and creep boundaries
+    shared_creep = Set(intersect(fault_ids, creep_ids))
+    # Criterion 2: nodes with fault_mat < 0.15 * median(fault_mat)
+    # Catches pathological endpoint nodes (fault_mat < ~30) while keeping
+    # well-conditioned interior nodes on shorter elements (fault_mat ~60-90)
+    fm_sorted = sort(fault_mat)
+    fm_median = fm_sorted[div(length(fm_sorted), 2)]
+    fm_threshold = 0.15 * fm_median
+    active_fault_mask = BitVector([
+        !(fault_ids[i] in shared_creep) && fault_mat[i] >= fm_threshold
+        for i in eachindex(fault_ids)
+    ])
+    n_excluded = count(!, active_fault_mask)
+    @info "Active fault mask: $(count(active_fault_mask))/$(length(fault_ids)) active, $n_excluded excluded (threshold=$fm_threshold, median=$fm_median)"
+
     # Construct complete mesh
     return UnstructuredSEMesh(
         trixi_mesh,
@@ -248,6 +266,7 @@ function build_mesh(config::MeshConfig, physics::PhysicsConfig)::UnstructuredSEM
         normal_dirs,
         boundaries,
         face_map,
+        active_fault_mask,
         ndof,
         n_elements,
         polydeg

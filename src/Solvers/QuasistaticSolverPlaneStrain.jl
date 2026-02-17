@@ -107,6 +107,7 @@ function quasistatic_step!(state::SimulationStatePlaneStrain{T},
     fault_id = mesh.boundaries.fault.node_ids
     creep_id = mesh.boundaries.creep.node_ids
     fault_matrix = mesh.boundaries.fault.matrix
+    mask = mesh.active_fault_mask
     ndof = state.ndof
     tangent = state.fault_tangent
 
@@ -225,6 +226,12 @@ function quasistatic_step!(state::SimulationStatePlaneStrain{T},
 
         # Steps 4 & 5: Update state variable and slip rate
         for i in eachindex(fault_id)
+            if !mask[i]
+                # Excluded endpoint: lock to plate rate, no state evolution
+                Vf_new[i] = params.Vpl
+                continue
+            end
+
             state.ψ[i] = state_time_evolution(state.ψ[i], Vf_new[i], dt,
                                              ics.friction.Lc[i], params.Vo)
 

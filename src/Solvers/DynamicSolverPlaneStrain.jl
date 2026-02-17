@@ -65,6 +65,7 @@ function dynamic_step!(state::SimulationStatePlaneStrain{T},
     creep_id = mesh.boundaries.creep.node_ids
     absorbing_id = mesh.boundaries.absorbing.node_ids
     fault_matrix = mesh.boundaries.fault.matrix
+    mask = mesh.active_fault_mask
     tangent = state.fault_tangent
     normal = state.fault_normal
 
@@ -117,6 +118,14 @@ function dynamic_step!(state::SimulationStatePlaneStrain{T},
 
     # Steps 5-7: Solve nonlinear fault boundary equations
     for i in eachindex(fault_id)
+        if !mask[i]
+            # Excluded endpoint: lock to plate rate, no state evolution
+            state.Vf[i] = params.Vpl
+            state.τf[i] = ics.τo[i]  # total stress = initial (no perturbation)
+            Vf_first_iter[i] = params.Vpl
+            continue
+        end
+
         # Normal stress: use constant σ_n⁰ for now.
         # TODO: For dipping faults, compute Δσ_n from elastic forces and use
         # σn_eff = ics.σo[i] + state.σn_perturbation[i]

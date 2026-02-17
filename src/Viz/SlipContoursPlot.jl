@@ -61,8 +61,8 @@ function plot_slip_contours(h5_file::String;
     end
 
     # Shift depths so free surface = 0 (surface is max value in coordinate system)
-    surface_depth = maximum(depths_km)
-    depths_km = depths_km .- surface_depth  # e.g., -40 → 0, -20 → 20
+    #surface_depth = maximum(depths_km)
+    #depths_km = depths_km .- surface_depth  # e.g., -40 → 0, -20 → 20
 
     # Classify each snapshot by max slip rate on fault
     max_sr = vec(maximum(slip_rate, dims=1))
