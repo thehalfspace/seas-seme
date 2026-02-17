@@ -256,6 +256,19 @@ function build_mesh(config::MeshConfig, physics::PhysicsConfig)::UnstructuredSEM
     n_excluded = count(!, active_fault_mask)
     @info "Active fault mask: $(count(active_fault_mask))/$(length(fault_ids)) active, $n_excluded excluded (threshold=$fm_threshold, median=$fm_median)"
 
+    # Lumped boundary mass: replace GLL-quadrature fault_mat with uniform value
+    # for active nodes. This eliminates node-to-node variation (ratio ~25x) that
+    # amplifies traction differently at each node, driving QS instability.
+    total_fault_mass = sum(fault_mat[i] for i in eachindex(fault_mat) if active_fault_mask[i])
+    n_active = count(active_fault_mask)
+    lumped_mass = total_fault_mass / n_active
+    for i in eachindex(fault_mat)
+        if active_fault_mask[i]
+            fault_mat[i] = lumped_mass
+        end
+    end
+    @info "Lumped fault mass: $lumped_mass (total=$total_fault_mass, n_active=$n_active)"
+
     # Construct complete mesh
     return UnstructuredSEMesh(
         trixi_mesh,

@@ -174,7 +174,8 @@ Where x_d is down-dip distance from free surface (meters).
 # Notes
 - Linear interpolation between CSV rows onto mesh fault nodes
 - τ⁰ computed from BP3-FD eq. 22 (fully dynamic, no radiation damping):
-  τ⁰ = σ_n * a * asinh(V_init/(2V₀) * exp((f₀ + b*ln(V₀/V_init))/a))
+  τ⁰ = σ_n * a_max * asinh(V_init/(2V₀) * exp((f₀ + b*ln(V₀/V_init))/a_max))
+  where a_max = max(a) — spatially uniform τ⁰ seeds nucleation in VW zone
 - V_init = plate_velocity (steady-state loading rate)
 """
 function build_initial_conditions_from_csv(
@@ -242,10 +243,13 @@ function build_initial_conditions_from_csv(
         V_plate
     end
 
+    # BP3 Eq. 22/25: τ⁰ uses a_max (not local a[i]) to create uniform stress
+    # that is overstressed in VW zone, seeding nucleation
+    a_max = maximum(a)
     τo = zeros(T, nfault)
     for i in 1:nfault
-        arg = V_init / (2 * Vo) * exp((fo + b[i] * log(Vo / V_init)) / a[i])
-        τo[i] = σn[i] * a[i] * asinh(arg)
+        arg = V_init / (2 * Vo) * exp((fo + b[i] * log(Vo / V_init)) / a_max)
+        τo[i] = σn[i] * a_max * asinh(arg)
     end
 
     # Build friction and IC structs

@@ -40,7 +40,7 @@ Specify the simulation directory and parameter files location.
 # ╔═╡ aee6645e-f699-4a7c-8a05-46ee0b9fe545
 begin
 	# Set simulation directory
-	simulation_name = "plane_strain_dipping"
+	simulation_name = "dip_slip_2d"
 	base_dir = joinpath(dirname(pwd()), "data")
 	sim_dir = joinpath(base_dir, simulation_name)
 	params_dir = joinpath(sim_dir, "params")
@@ -162,9 +162,9 @@ end
 # ╔═╡ dabb56ff-65dc-48a9-b061-39615f6ba0b1
 begin
 	# Read all snapshot data
-	times, slip, slip_rate, stress, state, depths_km = read_snapshots("../data/strike_slip_2d/outputs/strike_slip_2d.h5")
+	times, slip, slip_rate, stress, state, depths_km = read_snapshots("../data/dip_slip_2d/outputs/dip_slip_2d.h5")
 
-	config = get_snapshot_config("../data/strike_slip_2d/outputs/strike_slip_2d.h5")
+	#config = get_snapshot_config("../data/strike_slip_2d/outputs/strike_slip_2d.h5")
 end
 
 
@@ -176,10 +176,10 @@ begin
 	figsize = (800, 600)
 	fig = Figure(resolution=figsize)
 	x1 = Axis(fig[1, 1],
-			  xlabel="skup",
+			  xlabel="stress",
 			  ylabel="Depth (km)",
 			  title="slip")
-	plot!(slip)
+	plot!(stress')
 	fig
 end
 
