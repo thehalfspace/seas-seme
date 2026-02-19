@@ -241,20 +241,33 @@ function build_mesh(config::MeshConfig, physics::PhysicsConfig)::UnstructuredSEM
     @info "Boundary nodes: fault=$(length(fault_ids)), creep=$(length(creep_ids)), absorbing=$(length(absorb_ids))"
 
     # Compute active fault mask: exclude endpoint nodes with pathological fault_mat
-    # Criterion 1: nodes shared between fault and creep boundaries
+    # Criterion 1: nodes shared between fault and creep boundaries (deep/bottom junction)
     shared_creep = Set(intersect(fault_ids, creep_ids))
-    # Criterion 2: nodes with fault_mat < 0.15 * median(fault_mat)
+    # Criterion 2: node at the free surface (top junction where fault intersects surface).
+    # At the free surface, traction is zero, so rate-state friction produces unphysical
+    # results (near-zero elastic traction drives anomalous slip rates). Exclude by
+    # identifying the single fault node at maximum y (the free surface at y=Ly).
+    y_surface = maximum(fault_y)
+    y_tol = (maximum(fault_y) - minimum(fault_y)) * 1e-6
+    shared_free_surface = Set(fault_ids[i] for i in eachindex(fault_ids)
+                              if abs(fault_y[i] - y_surface) < y_tol)
+    # Criterion 3: nodes with fault_mat < 0.15 * median(fault_mat)
     # Catches pathological endpoint nodes (fault_mat < ~30) while keeping
     # well-conditioned interior nodes on shorter elements (fault_mat ~60-90)
     fm_sorted = sort(fault_mat)
     fm_median = fm_sorted[div(length(fm_sorted), 2)]
     fm_threshold = 0.15 * fm_median
-    active_fault_mask = BitVector([
-        !(fault_ids[i] in shared_creep) && fault_mat[i] >= fm_threshold
-        for i in eachindex(fault_ids)
-    ])
-    n_excluded = count(!, active_fault_mask)
-    @info "Active fault mask: $(count(active_fault_mask))/$(length(fault_ids)) active, $n_excluded excluded (threshold=$fm_threshold, median=$fm_median)"
+    # DEBUG: disable all masking — every fault node is active
+    active_fault_mask = trues(length(fault_ids))
+    n_excluded = 0
+    @info "Active fault mask: DISABLED (all $(length(fault_ids)) nodes active, 0 excluded)"
+    # Original mask logic (preserved, not active):
+    # active_fault_mask = BitVector([
+    #     !(fault_ids[i] in shared_creep) &&
+    #     !(fault_ids[i] in shared_free_surface) &&
+    #     fault_mat[i] >= fm_threshold
+    #     for i in eachindex(fault_ids)
+    # ])
 
     # Lumped boundary mass: replace GLL-quadrature fault_mat with uniform value
     # for active nodes. This eliminates node-to-node variation (ratio ~25x) that

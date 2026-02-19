@@ -21,6 +21,7 @@ Mutable container for simulation state.
 - `τf::Vector{T}`: Fault shear stress
 - `ψ::Vector{T}`: Transformed state variable (log θ)
 - `Vf::Vector{T}`: Fault slip rate
+- `cum_slip::Vector{T}`: Cumulative fault slip (integrated Vf*dt)
 
 # Workspace Arrays (pre-allocated for zero allocations)
 - `u_prev::Vector{T}`: Previous displacement
@@ -48,6 +49,7 @@ mutable struct SimulationState{T<:AbstractFloat}
     τf::Vector{T}
     ψ::Vector{T}
     Vf::Vector{T}
+    cum_slip::Vector{T}
 
     # Workspace arrays
     u_prev::Vector{T}
@@ -108,6 +110,7 @@ function SimulationState(mesh::UnstructuredSEMesh{T}, ics, params;
     τf = zeros(T, nfault)
     ψ = zeros(T, nfault)
     Vf = zeros(T, nfault)
+    cum_slip = zeros(T, nfault)
 
     # Allocate workspace arrays
     u_prev = zeros(T, ndof)
@@ -147,7 +150,7 @@ function SimulationState(mesh::UnstructuredSEMesh{T}, ics, params;
 
     return SimulationState{T}(
         u, v, a,
-        τf, ψ, Vf,
+        τf, ψ, Vf, cum_slip,
         u_prev, v_prev, f, fault_vfree,
         time, timestep, iteration, solver_mode
     )

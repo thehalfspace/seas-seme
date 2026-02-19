@@ -22,6 +22,7 @@ Mutable container for plane-strain simulation state.
 - `τf::Vector{T}`: Fault shear traction (tangential component)
 - `ψ::Vector{T}`: Transformed state variable (log θ)
 - `Vf::Vector{T}`: Fault slip rate (tangential, scalar)
+- `cum_slip::Vector{T}`: Cumulative fault slip (integrated Vf*dt)
 - `σn_perturbation::Vector{T}`: Normal stress perturbation from elasticity (Δσ_n)
 
 # Workspace Arrays
@@ -54,6 +55,7 @@ mutable struct SimulationStatePlaneStrain{T<:AbstractFloat}
     τf::Vector{T}
     ψ::Vector{T}
     Vf::Vector{T}
+    cum_slip::Vector{T}
     σn_perturbation::Vector{T}  # Normal stress perturbation from elasticity
 
     # Workspace arrays
@@ -114,6 +116,7 @@ function SimulationStatePlaneStrain(mesh::UnstructuredSEMesh{T}, ics, params;
     τf = zeros(T, nfault)
     ψ = zeros(T, nfault)
     Vf = zeros(T, nfault)
+    cum_slip = zeros(T, nfault)
     σn_perturbation = zeros(T, nfault)
 
     # Allocate workspace arrays
@@ -180,7 +183,7 @@ function SimulationStatePlaneStrain(mesh::UnstructuredSEMesh{T}, ics, params;
 
     return SimulationStatePlaneStrain{T}(
         u, v, a,
-        τf, ψ, Vf, σn_perturbation,
+        τf, ψ, Vf, cum_slip, σn_perturbation,
         u_prev, v_prev, f, fault_vfree,
         fault_tangent, fault_normal,
         time, timestep, iteration, solver_mode,

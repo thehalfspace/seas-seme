@@ -163,12 +163,13 @@ function quasistatic_step!(state, solver::QuasistaticSolver, mesh, physics,
                                    mesh.n_elements)
         rhs = rhs_full[solver.stiffness_op.fltni]
 
-        # Conjugate gradient with AMG preconditioner
-        u_sol, history = cg(solver.stiffness_op, -rhs,
-                           Pl=solver.preconditioner,
-                           reltol=solver.tolerance,
-                           maxiter=solver.max_iterations,
-                           log=true)
+        # Warm-start CG from previous displacement (critical after dynamic→QS transition)
+        x0 = state.u_prev[solver.stiffness_op.fltni]
+        u_sol, history = cg!(x0, solver.stiffness_op, -rhs,
+                            Pl=solver.preconditioner,
+                            reltol=solver.tolerance,
+                            maxiter=solver.max_iterations,
+                            log=true)
 
         state.u[solver.stiffness_op.fltni] .= u_sol
 

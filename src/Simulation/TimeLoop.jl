@@ -109,6 +109,9 @@ function run!(simulation)
             # Update time
             state.time += state.timestep
 
+            # Accumulate cumulative slip: works for both QS and dynamic modes
+            state.cum_slip .+= state.Vf .* state.timestep
+
             # Compute current maximum slip rate for mode switching
             Vf_max = maximum_fault_slip_rate(state)
 

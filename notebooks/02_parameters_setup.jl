@@ -177,9 +177,10 @@ begin
 	fig = Figure(resolution=figsize)
 	x1 = Axis(fig[1, 1],
 			  xlabel="stress",
-			  ylabel="Depth (km)",
+			  ylabel="Dep",
 			  title="slip")
-	plot!(stress')
+	plot!(stress[:,1:800])
+	#series(stress[:,1:2], solid_color=:black)
 	fig
 end
 

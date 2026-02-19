@@ -332,20 +332,16 @@ end
 Compute cumulative slip at a single fault node (antiplane).
 """
 function compute_fault_slip(state::SimulationState, fault_id, fault_idx::Int, time, Vpl)
-    return 2 * state.u[fault_id[fault_idx]] + Vpl * time
+    return state.cum_slip[fault_idx]
 end
 
 """
     compute_fault_slip(state, fault_id, fault_idx, time, Vpl)
 
 Compute cumulative slip at a single fault node (plane-strain).
-Projects displacement onto fault tangent direction.
 """
 function compute_fault_slip(state::SimulationStatePlaneStrain, fault_id, fault_idx::Int, time, Vpl)
-    nid = fault_id[fault_idx]
-    u_tang = state.u[nid] * state.fault_tangent[1, fault_idx] +
-             state.u[state.ndof + nid] * state.fault_tangent[2, fault_idx]
-    return 2 * u_tang + Vpl * time
+    return state.cum_slip[fault_idx]
 end
 
 """
@@ -354,25 +350,16 @@ end
 Compute cumulative slip at all fault nodes (antiplane).
 """
 function compute_fault_slip_profile(state::SimulationState, fault_id, time, Vpl)
-    return 2 .* state.u[fault_id] .+ Vpl * time
+    return copy(state.cum_slip)
 end
 
 """
     compute_fault_slip_profile(state, fault_id, time, Vpl)
 
 Compute cumulative slip at all fault nodes (plane-strain).
-Projects displacement onto fault tangent direction.
 """
 function compute_fault_slip_profile(state::SimulationStatePlaneStrain, fault_id, time, Vpl)
-    nfault = length(fault_id)
-    slip = zeros(eltype(state.u), nfault)
-    for i in 1:nfault
-        nid = fault_id[i]
-        u_tang = state.u[nid] * state.fault_tangent[1, i] +
-                 state.u[state.ndof + nid] * state.fault_tangent[2, i]
-        slip[i] = 2 * u_tang + Vpl * time
-    end
-    return slip
+    return copy(state.cum_slip)
 end
 
 
