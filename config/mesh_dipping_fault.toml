@@ -15,13 +15,13 @@ Ly = 40.0e3                    # Domain height (40 km)
 # Fault geometry (meters)
 start_y = 20.0e3               # Y-coordinate where fault begins (20 km)
                                # Fault extends from start_y to Ly on dipping right edge
-dip_angle = 60.0               # Fault dip angle in degrees (60° dipping fault)
+dip_angle = 120.0               # Fault dip angle in degrees (60° dipping fault)
 
 [meshing]
 # Element sizing (meters)
-background_grid_size = 2.0e3   # Default element size away from fault (2 km)
-fault_refinement_h = 1e3       # Target element size along fault (1 km)
-fault_refinement_width = 5.0e3 # Width of refinement zone around fault (5 km)
+background_grid_size = 4.0e3   # Default element size away from fault (2 km)
+fault_refinement_h = 2e3       # Target element size along fault (1 km)
+fault_refinement_width = 20.0e3 # Width of refinement zone around fault (5 km)
 
 # Spectral element configuration
 polynomial_order = 4           # Polynomial degree (p=4 means 5 nodes per element)
@@ -38,5 +38,5 @@ smoothing_iterations = 50      # Number of spring smoothing iterations
 
 [output]
 # Mesh output configuration
-output_dir = "data/mesh/dipping_fault_60"
+output_dir = "data/mesh/dipping_fault_120"
 mesh_name = "dipping_fault"
