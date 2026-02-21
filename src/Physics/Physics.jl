@@ -10,4 +10,3 @@ This module provides the physical models for earthquake cycle simulations:
 # Module exports
 export RateStateFriction, MaterialProperties, InitialConditions
 export build_initial_conditions, save_initial_conditions
-export build_initial_conditions_plane_strain

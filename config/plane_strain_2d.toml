@@ -35,7 +35,6 @@ reference_friction = 0.6            # Reference friction coefficient fo
 reference_slip_rate = 1.0e-6        # Reference slip rate Vo (m/s)
 
 [physics.initial_conditions]
-type = "csv"
 file = "./config/ic_bp3_60deg_thrust.csv"
 
 [solvers]

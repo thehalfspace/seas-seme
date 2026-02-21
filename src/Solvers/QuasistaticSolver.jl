@@ -173,22 +173,9 @@ function quasistatic_step!(state, solver::QuasistaticSolver, mesh, physics,
 
         state.u[solver.stiffness_op.fltni] .= u_sol
 
-        # Convergence diagnostics
-        if solver.verbose && (state.iteration <= 10 || mod(state.iteration, 500) == 0)
-            niter = length(history[:resnorm]) - 1
-            converged = history.isconverged
-            println("  QS CG iterations: $niter, converged: $converged")
-            if !converged
-                println("    Final residual: $(history[:resnorm][end])")
-                println("    u_sol stats: min=$(minimum(u_sol)), max=$(maximum(u_sol)), any_nan=$(any(isnan.(u_sol)))")
-            end
-        end
-
         # Check for NaN in solution
         if any(isnan.(u_sol)) || any(isinf.(u_sol))
             @error "Non-finite values in CG solution" pass iteration=state.iteration converged=history.isconverged
-            println("  rhs stats: min=$(minimum(rhs)), max=$(maximum(rhs)), any_nan=$(any(isnan.(rhs)))")
-            println("  u_sol stats: min=$(minimum(u_sol)), max=$(maximum(u_sol)), any_nan=$(any(isnan.(u_sol)))")
             error("CG solver produced non-finite values")
         end
 
@@ -207,25 +194,10 @@ function quasistatic_step!(state, solver::QuasistaticSolver, mesh, physics,
         state.a[creep_id] .= 0
 
         # Fault shear stress (τ = -K*u / fault_matrix)
-        # Check for zeros in fault_matrix which would cause NaN
-        if state.iteration == 1 && pass == 1
-            n_zeros = sum(fault_matrix .== 0)
-            if n_zeros > 0
-                @error "Zero values in fault impedance matrix" n_zeros total=length(fault_matrix)
-                println("  fault_matrix stats: min=$(minimum(fault_matrix)), max=$(maximum(fault_matrix))")
-                println("  Zero indices: ", findall(fault_matrix .== 0))
-                error("Cannot compute fault stress with zero impedance matrix values")
-            end
-        end
-
         state.τf .= -state.a[fault_id] ./ fault_matrix
 
-        # Check for NaN in fault stress
         if any(isnan.(state.τf)) || any(isinf.(state.τf))
             @error "Non-finite fault stress" pass iteration=state.iteration
-            println("  state.a[fault_id] stats: min=$(minimum(state.a[fault_id])), max=$(maximum(state.a[fault_id]))")
-            println("  fault_matrix stats: min=$(minimum(fault_matrix)), max=$(maximum(fault_matrix))")
-            println("  τf stats: min=$(minimum(state.τf)), max=$(maximum(state.τf)), any_nan=$(any(isnan.(state.τf)))")
             error("Non-finite fault stress computed")
         end
 

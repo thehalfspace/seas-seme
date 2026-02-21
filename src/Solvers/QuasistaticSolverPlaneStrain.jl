@@ -65,8 +65,6 @@ function build_quasistatic_solver_plane_strain(
     ml = ruge_stuben(K_reduced, max_levels=amg_max_levels)
     amg_precond = aspreconditioner(ml)
 
-    @info "PS-QS AMG preconditioner" levels=length(ml.levels) coarsest=size(ml.levels[end].A, 1) total_dofs=2*ndof free_dofs=length(fltni)
-
     # Build matrix-free operator
     stiffness_op = StiffnessOperatorPlaneStrain(K_el, dof_id, mesh.n_elements,
                                                  ndof, fltni)
@@ -218,37 +216,6 @@ function quasistatic_step!(state::SimulationStatePlaneStrain{T},
         state.v[creep_id] .= 0
         state.v[ndof .+ creep_id] .= 0
     end  # Two-pass iteration
-
-    # DIAGNOSTIC: Print fault loading state for first few iterations and periodically
-    if state.iteration <= 5 || mod(state.iteration, 500) == 0
-        # Find VW zone nodes (a < b) that are active
-        vw_indices = Int[]
-        for i in eachindex(fault_id)
-            if mask[i] && ics.friction.a[i] < ics.friction.b[i]
-                push!(vw_indices, i)
-            end
-        end
-        if !isempty(vw_indices)
-            # Sample: first, middle, last VW node
-            sample_idx = unique([vw_indices[1],
-                                 vw_indices[div(length(vw_indices), 2)],
-                                 vw_indices[end]])
-            @info "PS-QS DIAG iter=$(state.iteration)" dt=dt
-            for idx in sample_idx
-                nid = fault_id[idx]
-                # Fault-side displacement projected onto tangent
-                u_tang = state.u[nid] * tangent[1, idx] + state.u[ndof + nid] * tangent[2, idx]
-                v_tang = state.v[nid] * tangent[1, idx] + state.v[ndof + nid] * tangent[2, idx]
-                @info "  node=$idx a=$(ics.friction.a[idx]) b=$(ics.friction.b[idx])" τf=state.τf[idx] τ0=ics.τo[idx] ψ=state.ψ[idx] Vf=Vf_new[idx] u_tang=u_tang v_tang=v_tang σn_pert=state.σn_perturbation[idx] tangent_x=tangent[1,idx] tangent_y=tangent[2,idx]
-            end
-            # Also print global stats
-            active_mask = mask
-            active_τf = state.τf[active_mask]
-            active_Vf = Vf_new[active_mask]
-            active_ψ = state.ψ[active_mask]
-            @info "  GLOBAL:" τf_min=minimum(active_τf) τf_max=maximum(active_τf) Vf_min=minimum(active_Vf) Vf_max=maximum(active_Vf) ψ_min=minimum(active_ψ) ψ_max=maximum(active_ψ) u_max=maximum(abs.(state.u))
-        end
-    end
 
     # Update global velocity from displacement change
     state.v .= (state.u .- state.u_prev) ./ dt

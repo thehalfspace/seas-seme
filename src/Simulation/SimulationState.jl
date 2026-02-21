@@ -39,7 +39,9 @@ Mutable container for simulation state.
 All arrays are mutable and modified in-place during time stepping to avoid allocations.
 The state can be serialized for checkpointing via JLD2.
 """
-mutable struct SimulationState{T<:AbstractFloat}
+abstract type AbstractSimulationState{T<:AbstractFloat} end
+
+mutable struct SimulationState{T<:AbstractFloat} <: AbstractSimulationState{T}
     # Global fields
     u::Vector{T}
     v::Vector{T}

@@ -152,7 +152,8 @@ function build_simulation_antiplane(config::SimulationConfig; T::Type=Float64)
         yr2sec = T(365.25 * 24 * 3600)
     )
 
-    ics = build_initial_conditions(config.physics, mesh)
+    ics = build_initial_conditions(config.physics.initial_conditions.file, mesh,
+                                   config.physics, config.physics.dip_angle)
     @printf("  Initial conditions generated\n")
     @printf("  Fault depth range: %.1f - %.1f km\n",
            minimum(mesh.boundaries.fault.coords[2,:]) / 1000,
@@ -197,12 +198,8 @@ function build_simulation_antiplane(config::SimulationConfig; T::Type=Float64)
 
     # 8. Initialize simulation state
     println("\n[8/8] Initializing simulation state...")
-    # For CSV ICs: v_init = Vpl/2 so that Vf = 2*v_init = Vpl (steady state).
-    v_init_val = if config.physics.initial_conditions.type == "csv"
-        T(params.Vpl) / 2
-    else
-        T(5.0e-4)
-    end
+    # v_init = Vpl/2 so that Vf = 2*v_init = Vpl (steady state, consistent with τ⁰)
+    v_init_val = T(params.Vpl) / 2
     state = SimulationState(mesh, ics, params, v_init=v_init_val)
     @printf("  Simulation state initialized (v_init = %.3e m/s)\n", v_init_val)
     @printf("  Initial max slip rate: %.3e m/s\n", maximum_fault_slip_rate(state))
@@ -328,8 +325,8 @@ function build_simulation_plane_strain(config::SimulationConfig; T::Type=Float64
         yr2sec = T(365.25 * 24 * 3600)
     )
 
-    ics = build_initial_conditions_plane_strain(config.physics, mesh,
-                                                config.physics.dip_angle)
+    ics = build_initial_conditions(config.physics.initial_conditions.file, mesh,
+                                   config.physics, config.physics.dip_angle)
     @printf("  Initial conditions generated\n")
     @printf("  Fault depth range: %.1f - %.1f km\n",
            minimum(mesh.boundaries.fault.coords[2,:]) / 1000,
@@ -375,15 +372,8 @@ function build_simulation_plane_strain(config::SimulationConfig; T::Type=Float64
 
     # 8. Initialize simulation state
     println("\n[8/9] Initializing simulation state...")
-    # For CSV-based ICs, τ⁰ is computed at steady-state V = Vpl, so the initial
-    # slip rate must also be Vpl for consistency. v_init is the half-rate:
-    # Vf = 2*v_init, so v_init = Vpl/2 gives Vf = Vpl (steady state).
-    # For depth-dependent ICs, the warm-start v_init=5e-4 is retained.
-    v_init_val = if config.physics.initial_conditions.type == "csv"
-        T(Vpl_eff) / 2
-    else
-        T(5.0e-4)
-    end
+    # v_init = Vpl_eff/2 so that Vf = 2*v_init = Vpl_eff (steady state, consistent with τ⁰)
+    v_init_val = T(Vpl_eff) / 2
     state = SimulationStatePlaneStrain(mesh, ics, params, v_init=v_init_val)
     @printf("  Plane-strain simulation state initialized (v_init = %.3e m/s)\n", v_init_val)
     @printf("  Initial max slip rate: %.3e m/s\n", maximum_fault_slip_rate(state))

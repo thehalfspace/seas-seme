@@ -49,7 +49,6 @@ include("Mesh/Mesh.jl")
 
 include("Physics/RateStateFriction.jl")
 include("Physics/InitialConditions.jl")
-include("Physics/InitialConditionsPlaneStrain.jl")
 include("Physics/Physics.jl")
 
 include("Discretization/MassMatrix.jl")
@@ -86,6 +85,6 @@ export SimulationConfig, MeshConfig, PhysicsConfig, SolverConfig, OutputConfig, 
 export load_config, validate_config
 export build_simulation, run!
 export load_checkpoint, save_checkpoint
-export SimulationStatePlaneStrain
+export AbstractSimulationState, SimulationState, SimulationStatePlaneStrain
 
 end # module SEAS_SEME

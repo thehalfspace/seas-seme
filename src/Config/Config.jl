@@ -98,12 +98,9 @@ end
 Parse physics configuration from TOML dict.
 """
 function parse_physics_config(dict::Dict)::PhysicsConfig
-    ic_type = get(dict["initial_conditions"], "type", "depth_dependent")
-    ic_config = InitialConditionsConfig(
-        ic_type,
-        get(dict["initial_conditions"], "velocity_strengthening_shallow", false),
-        get(dict["initial_conditions"], "file", nothing)
-    )
+    ic_dict = get(dict, "initial_conditions", Dict())
+    haskey(ic_dict, "file") || error("Initial conditions CSV file path is required in [physics.initial_conditions]")
+    ic_config = InitialConditionsConfig(ic_dict["file"])
 
     # Parse formulation (default: antiplane for backward compatibility)
     formulation_str = get(dict, "formulation", "antiplane")
@@ -285,13 +282,8 @@ function validate_config(config::SimulationConfig)
         config.physics.formulation == :plane_strain ||
             error("dip_slip loading requires plane_strain formulation")
     end
-    config.physics.initial_conditions.type in ("depth_dependent", "csv") ||
-        error("initial_conditions.type must be 'depth_dependent' or 'csv', got '$(config.physics.initial_conditions.type)'")
-    if config.physics.initial_conditions.type == "csv"
-        ic_file = config.physics.initial_conditions.file
-        isnothing(ic_file) && error("CSV initial conditions require 'file' path in [physics.initial_conditions]")
-        isfile(ic_file) || error("Initial conditions CSV file not found: $ic_file")
-    end
+    ic_file = config.physics.initial_conditions.file
+    isfile(ic_file) || error("Initial conditions CSV file not found: $ic_file")
 
     # Solver validation
     0 < config.solvers.cfl_number <= 1 || error("cfl_number must be in (0, 1]")

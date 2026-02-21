@@ -45,7 +45,7 @@ Mutable container for plane-strain simulation state.
 - `ndof::Int`: Number of spatial DOFs
 - `nfault::Int`: Number of fault nodes
 """
-mutable struct SimulationStatePlaneStrain{T<:AbstractFloat}
+mutable struct SimulationStatePlaneStrain{T<:AbstractFloat} <: AbstractSimulationState{T}
     # Global fields (length 2*ndof)
     u::Vector{T}
     v::Vector{T}

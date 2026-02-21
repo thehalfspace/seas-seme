@@ -1,0 +1,28 @@
+# Strike-slip initial conditions (vertical fault, dip=90°)
+# Encodes the depth-zone profile from BP3-QD benchmark (antiplane formulation).
+# x_d == vertical depth (meters) for 90° dip fault.
+#
+# Zones:
+#   0-2 km    : Velocity strengthening (a-b transitions from +0.003 to -0.0041)
+#   2-12 km   : Velocity weakening seismogenic (a-b = -0.0041)
+#   12-17 km  : Transition (a-b transitions from -0.0041 to +0.015)
+#   17-20 km  : Deep velocity strengthening (a-b transitions from +0.015 to +0.0009)
+#   >20 km    : Very deep velocity strengthening (a-b = +0.0047)
+#
+# b = 0.019 everywhere, Lc = 8e-3 m everywhere
+# Normal stress: linearly 10→50 MPa over 0-2 km, then 50 MPa constant
+#
+# a values at zone boundaries:
+#   depth=0:     a = 0.019 - 0.003 = 0.016          (a-b = +0.003)
+#   depth=2000:  a = 0.019 - 0.0041 = 0.0149         (a-b = -0.0041)
+#   depth=12000: a = 0.019 - 0.0041 = 0.0149         (a-b = -0.0041)
+#   depth=17000: a = 0.019 + 0.015  = 0.034           (a-b = +0.015)
+#   depth=20000: a = 0.019 + 0.015 + 0.0009 = 0.0349  (a-b = +0.0159)
+#   depth=24000: a = 0.019 + 0.0047 = 0.0237          (a-b = +0.0047, extrapolated)
+x_d,a,b,Lc,sigma_n
+0.0,0.016,0.019,0.008,10000000.0
+2000.0,0.0149,0.019,0.008,50000000.0
+12000.0,0.0149,0.019,0.008,50000000.0
+17000.0,0.034,0.019,0.008,50000000.0
+20000.0,0.0349,0.019,0.008,50000000.0
+24000.0,0.0237,0.019,0.008,50000000.0

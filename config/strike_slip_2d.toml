@@ -33,15 +33,7 @@ reference_friction = 0.6            # Reference friction coefficient fo
 reference_slip_rate = 1.0e-6        # Reference slip rate Vo (m/s)
 
 [physics.initial_conditions]
-type = "depth_dependent"            # Generate depth-dependent friction profile
-velocity_strengthening_shallow = true   # VS friction in shallow zone (0-2km)
-# file = "/path/to/custom_ic.dat"  # Optional: custom IC file
-
-# Depth zones (see pre/set_initial_conditions.jl for details):
-# Zone 1: 0-2 km    (velocity strengthening, a > b)
-# Zone 2: 2-12 km   (velocity weakening, a < b, seismogenic zone)
-# Zone 3: 12-17 km  (transition zone)
-# Zone 4: 17-20 km  (velocity strengthening, deep creep)
+file = "./config/ic_strike_slip.csv"
 
 [solvers]
 cfl_number = 0.6                    # CFL stability criterion

@@ -9,11 +9,11 @@ day2sec = 86400.0                   # Seconds per day (24 * 3600)
 
 [simulation]
 name = "dip_slip_2d"
-total_time_years = 130.0             # Total simulation time in years
+total_time_years = 210.0             # Total simulation time in years
 output_dir = "./data"               # Base output directory
 
 [mesh]
-file = "./data/mesh/dipping_fault_60/dipping_fault.mesh"
+file = "./data/mesh/dipping_fault_120/dipping_fault.mesh"
 #file = "./data/mesh/homogeneous_lowres/homogeneous.mesh"
 polynomial_degree = 4               # Spectral element polynomial degree (p=4)
 
@@ -35,7 +35,6 @@ reference_friction = 0.6            # Reference friction coefficient fo
 reference_slip_rate = 1.0e-6        # Reference slip rate Vo (m/s)
 
 [physics.initial_conditions]
-type = "csv"
 file = "./config/ic_bp3_60deg_thrust.csv"
 
 [solvers]

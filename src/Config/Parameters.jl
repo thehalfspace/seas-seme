@@ -28,14 +28,10 @@ end
 Configuration for initial conditions (stress, friction parameters).
 
 # Fields
-- `type::String`: Type of initial conditions ("depth_dependent" or "custom")
-- `velocity_strengthening_shallow::Bool`: Use velocity-strengthening friction in shallow zone
-- `file::Union{String,Nothing}`: Optional path to custom IC file
+- `file::String`: Path to CSV file with columns: x_d, a, b, Lc, sigma_n (required)
 """
 struct InitialConditionsConfig
-    type::String
-    velocity_strengthening_shallow::Bool
-    file::Union{String,Nothing}
+    file::String  # Path to CSV file (required)
 end
 
 """
