@@ -49,8 +49,7 @@ function fault_slip_rate(ψ::T, τ::T, τ_init::T, σ_n::T,
     term2 = -(f₀ + b * ψ) / a
 
     # Clamp exponential arguments to prevent overflow
-    # exp(700) ≈ 1e304, exp(-700) ≈ 3e-305 for Float64
-    max_exp_arg = T(700)
+    max_exp_arg = T(EXP_ARG_MAX)
     arg_plus = clamp(term2 + term1, -max_exp_arg, max_exp_arg)
     arg_minus = clamp(term2 - term1, -max_exp_arg, max_exp_arg)
 
@@ -88,41 +87,37 @@ function state_time_evolution(ψ_old::T, V::T, dt::T, Lc::T, V₀::T) where T<:R
     end
 
     # Clamp slip rate to physical bounds before state evolution
-    # |V| > vs (~3500 m/s) is unphysical; use a generous bound
-    V_clamped = clamp(V, T(-1e4), T(1e4))
+    V_clamped = clamp(V, T(-V_PHYS_MAX), T(V_PHYS_MAX))
 
     Vdt_L = abs(V_clamped) * dt / Lc
+    exp_max = T(EXP_ARG_MAX)
+    ψ_lo = T(PSI_MIN)
+    ψ_hi = T(PSI_MAX)
 
     if Vdt_L < V₀
         # Small slip regime
-        # Clamp exponential argument to prevent overflow
-        exp_arg = clamp(ψ_old - Vdt_L, T(-700), T(700))
+        exp_arg = clamp(ψ_old - Vdt_L, -exp_max, exp_max)
         log_arg = exp(exp_arg) + V₀ * dt / Lc - 0.5 * V₀ * abs(V_clamped) * dt^2 / Lc^2
 
-        # Ensure log argument is positive
         if log_arg <= 0
             @warn "Non-positive argument to log in state evolution (small slip)" log_arg V dt Lc
-            return ψ_old  # Return previous state as fallback
+            return ψ_old
         end
 
-        # Clamp ψ to physical bounds: ψ ∈ [-20, 30]
-        # ψ = -20 → V/V₀ ~ e^20 ~ 5e8 (way beyond seismic)
-        # ψ = +30 → V/V₀ ~ e^-30 ~ 1e-13 (fully locked)
-        return clamp(log(log_arg), T(-20), T(30))
+        return clamp(log(log_arg), ψ_lo, ψ_hi)
     else
         # Large slip regime
-        exp_arg1 = clamp(ψ_old - Vdt_L, T(-700), T(700))
-        exp_arg2 = clamp(-Vdt_L, T(-700), T(700))
+        exp_arg1 = clamp(ψ_old - Vdt_L, -exp_max, exp_max)
+        exp_arg2 = clamp(-Vdt_L, -exp_max, exp_max)
 
         log_arg = exp(exp_arg1) + (V₀ / abs(V_clamped)) * (1 - exp(exp_arg2))
 
-        # Ensure log argument is positive
         if log_arg <= 0
             @warn "Non-positive argument to log in state evolution (large slip)" log_arg V dt Lc
-            return ψ_old  # Return previous state as fallback
+            return ψ_old
         end
 
-        return clamp(log(log_arg), T(-20), T(30))
+        return clamp(log(log_arg), ψ_lo, ψ_hi)
     end
 end
 
@@ -161,15 +156,13 @@ function nr_search(τ_guess::T, f₀::T, V₀::T, a::T, b::T, σ_n::T,
                   τ_init::T, ψ::T, fault_z::T, fault_vfree::T;
                   tol_factor::T=0.001, max_iter::Int=1000) where T<:Real
 
-    # Velocity weakening factor (large Vw ensures fact ≈ 1)
-    Vw = T(1.0e10)
-    fact = 1 + (V₀ / Vw) * exp(-ψ)
+    # Velocity weakening factor (large Vw ensures fact ≈ 1, weakening disabled)
+    fact = 1 + (V₀ / T(VW_WEAKENING)) * exp(-ψ)
 
     # Convergence tolerance
     tol = tol_factor * a * σ_n
 
-    # Maximum safe exponential argument (exp(700) ≈ 1e304 for Float64)
-    max_exp_arg = T(700)
+    max_exp_arg = T(EXP_ARG_MAX)
 
     # Initialize
     τ = τ_guess
@@ -208,7 +201,7 @@ function nr_search(τ_guess::T, f₀::T, V₀::T, a::T, b::T, σ_n::T,
         end
     end
 
-    # Recompute final slip rate with converged stress (with clamping for safety)
+    # Recompute final slip rate with converged stress
     fa = fact * τ / (σ_n * a)
     help = -(f₀ + b * ψ) / a
     arg_plus = clamp(help + fa, -max_exp_arg, max_exp_arg)

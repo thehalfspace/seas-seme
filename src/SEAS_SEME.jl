@@ -36,6 +36,8 @@ using HDF5
 using JLD2
 
 # Include submodules
+include("NumericalConstants.jl")
+
 include("Config/Parameters.jl")
 include("Config/Config.jl")
 

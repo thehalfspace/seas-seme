@@ -233,24 +233,29 @@ function apply_stiffness_plane_strain!(
 
     nnodes_sq = size(dof_id, 1) * size(dof_id, 2)
 
+    # Allocate element-local buffers once per call (not per element)
+    idx_flat = Vector{Int}(undef, nnodes_sq)
+    x_local  = zeros(T, 2 * nnodes_sq)
+    y_local  = Vector{T}(undef, 2 * nnodes_sq)
+
     for el in 1:n_elements
-        local_idx = dof_id[:, :, el]  # Spatial DOF indices
-        idx_flat = local_idx[:]       # Flattened to vector of length N
+        local_idx = dof_id[:, :, el]
+        copyto!(idx_flat, vec(local_idx))
 
-        # Gather local vector: [x_x; x_y] of length 2N
-        x_local = zeros(T, 2 * nnodes_sq)
-        x_local[1:nnodes_sq] = x[idx_flat]
-        x_local[nnodes_sq+1:2*nnodes_sq] = x[ndof .+ idx_flat]
+        # Gather: [x_x; x_y]
+        @inbounds for i in 1:nnodes_sq
+            x_local[i]             = x[idx_flat[i]]
+            x_local[nnodes_sq + i] = x[ndof + idx_flat[i]]
+        end
 
-        # Local matrix-vector product
-        y_local = K_el[:, :, el] * x_local
+        # Local matrix-vector product (no allocation: mul! into pre-allocated y_local)
+        mul!(y_local, view(K_el, :, :, el), x_local)
 
         # Scatter-add into global vector
-        y_x_local = reshape(y_local[1:nnodes_sq], size(local_idx))
-        y_y_local = reshape(y_local[nnodes_sq+1:2*nnodes_sq], size(local_idx))
-
-        y[local_idx] .+= y_x_local
-        y[ndof .+ local_idx] .+= y_y_local
+        @inbounds for i in 1:nnodes_sq
+            y[idx_flat[i]]        += y_local[i]
+            y[ndof + idx_flat[i]] += y_local[nnodes_sq + i]
+        end
     end
 
     return y
@@ -270,8 +275,12 @@ struct StiffnessOperatorPlaneStrain{T<:AbstractFloat} <: AbstractMatrix{T}
     n_elements::Int
     ndof::Int                  # spatial DOFs
     fltni::Vector{Int}         # free DOF indices in 2*ndof space
-    x_full::Vector{T}         # workspace [2*ndof]
-    y_full::Vector{T}         # workspace [2*ndof]
+    x_full::Vector{T}          # workspace [2*ndof]
+    y_full::Vector{T}          # workspace [2*ndof]
+    # Element-local workspaces — pre-allocated to avoid per-element allocs in mul!
+    idx_flat::Vector{Int}      # workspace [nnodes²]
+    x_local::Vector{T}         # workspace [2*nnodes²]
+    y_local::Vector{T}         # workspace [2*nnodes²]
 end
 
 function StiffnessOperatorPlaneStrain(
@@ -281,17 +290,44 @@ function StiffnessOperatorPlaneStrain(
     ndof::Int,
     fltni::Vector{Int}
 ) where {T<:AbstractFloat}
-    x_full = zeros(T, 2 * ndof)
-    y_full = zeros(T, 2 * ndof)
-    return StiffnessOperatorPlaneStrain(K_el, dof_id, n_elements, ndof, fltni, x_full, y_full)
+    x_full   = zeros(T, 2 * ndof)
+    y_full   = zeros(T, 2 * ndof)
+    nnodes_sq = size(dof_id, 1) * size(dof_id, 2)
+    idx_flat = Vector{Int}(undef, nnodes_sq)
+    x_local  = zeros(T, 2 * nnodes_sq)
+    y_local  = Vector{T}(undef, 2 * nnodes_sq)
+    return StiffnessOperatorPlaneStrain(K_el, dof_id, n_elements, ndof, fltni,
+                                        x_full, y_full, idx_flat, x_local, y_local)
 end
 
 function LinearAlgebra.mul!(y::Vector, A::StiffnessOperatorPlaneStrain{T}, x::Vector) where {T}
+    ndof      = A.ndof
+    nnodes_sq = length(A.idx_flat)
+
     fill!(A.x_full, zero(T))
     A.x_full[A.fltni] .= x
 
-    apply_stiffness_plane_strain!(A.y_full, A.x_full, A.K_el, A.dof_id,
-                                  A.n_elements, A.ndof)
+    fill!(A.y_full, zero(T))
+
+    for el in 1:A.n_elements
+        local_idx = A.dof_id[:, :, el]
+        copyto!(A.idx_flat, vec(local_idx))
+
+        # Gather: [x_x; x_y]
+        @inbounds for i in 1:nnodes_sq
+            A.x_local[i]             = A.x_full[A.idx_flat[i]]
+            A.x_local[nnodes_sq + i] = A.x_full[ndof + A.idx_flat[i]]
+        end
+
+        # Local matvec (zero-allocation)
+        mul!(A.y_local, view(A.K_el, :, :, el), A.x_local)
+
+        # Scatter-add
+        @inbounds for i in 1:nnodes_sq
+            A.y_full[A.idx_flat[i]]        += A.y_local[i]
+            A.y_full[ndof + A.idx_flat[i]] += A.y_local[nnodes_sq + i]
+        end
+    end
 
     y .= A.y_full[A.fltni]
     return y

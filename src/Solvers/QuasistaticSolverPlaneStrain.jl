@@ -132,10 +132,11 @@ function quasistatic_step!(state::SimulationStatePlaneStrain{T},
         end
 
         # Step 2: Solve K*u = -f for free DOFs
-        rhs_full = zeros(T, 2 * ndof)
-        apply_stiffness_plane_strain!(rhs_full, state.f, solver.stiffness_op.K_el,
+        # Use operator's pre-allocated y_full buffer to avoid allocation
+        apply_stiffness_plane_strain!(solver.stiffness_op.y_full, state.f,
+                                      solver.stiffness_op.K_el,
                                       solver.stiffness_op.dof_id, mesh.n_elements, ndof)
-        rhs = rhs_full[solver.stiffness_op.fltni]
+        rhs = solver.stiffness_op.y_full[solver.stiffness_op.fltni]
 
         # Warm-start CG from previous displacement (critical after dynamic→QS transition)
         x0 = state.u_prev[solver.stiffness_op.fltni]
@@ -167,6 +168,7 @@ function quasistatic_step!(state::SimulationStatePlaneStrain{T},
         fill!(state.a, zero(T))
         apply_stiffness_plane_strain!(state.a, state.u, solver.stiffness_op.K_el,
                                       solver.stiffness_op.dof_id, mesh.n_elements, ndof)
+        # Note: state.a is separate from the operator workspaces, no aliasing issue
 
         # Zero force on creep boundary
         state.a[creep_id] .= 0
