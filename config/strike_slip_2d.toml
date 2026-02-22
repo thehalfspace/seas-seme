@@ -8,7 +8,7 @@ yr2sec = 31557600.0                 # Seconds per year (365.25 * 24 * 3600)
 day2sec = 86400.0                   # Seconds per day (24 * 3600)
 
 [simulation]
-name = "strike_slip_2d_highres"
+name = "strike_slip_2d_test"
 total_time_years = 400.0             # Total simulation time in years
 output_dir = "./data"               # Base output directory (simulation folder created inside)
 

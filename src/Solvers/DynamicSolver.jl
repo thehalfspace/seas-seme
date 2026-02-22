@@ -136,6 +136,9 @@ function dynamic_step!(state, solver::DynamicSolver{T}, mesh, physics, ics,
 
     # Step 5-7: Solve nonlinear fault boundary equations
     for i in eachindex(fault_id)
+        # Save ψ before update so we can restore on NR failure
+        ψ_saved = state.ψ[i]
+
         # Update state variable using slip rate from previous step
         state.ψ[i] = state_time_evolution(state.ψ[i], Vf_prev[i], dt,
                                          ics.friction.Lc[i], params.Vo)
@@ -162,21 +165,25 @@ function dynamic_step!(state, solver::DynamicSolver{T}, mesh, physics, ics,
             state.fault_vfree[i]
         )
 
-        # Check for NaN (indicates NR failure)
+        # Check for NaN (indicates NR failure) — restore ψ and continue
         if isnan(state.Vf[i]) || isnan(state.τf[i])
-            @error "NR search failed" location=i iter=state.iteration V=state.Vf[i] τ=state.τf[i]
-            error("Newton-Raphson search failed to converge")
+            state.ψ[i] = ψ_saved
+            state.Vf[i] = Vf_prev[i]
+            state.τf[i] = τ_total_guess - ics.τo[i]
+            @warn "NR search produced NaN, restoring previous state" location=i iter=state.iteration
+            continue
         end
 
         # 2nd iteration: Update state with average slip rate for accuracy
         # (See Kaneko et al. 2008 - single iteration is less accurate)
+        ψ_after_first = state.ψ[i]
         avg_slip_rate = 0.5 * (state.Vf[i] + Vf_first_iter[i])
         state.ψ[i] = state_time_evolution(state.ψ[i], avg_slip_rate, dt,
                                          ics.friction.Lc[i], params.Vo)
 
-        # Newton-Raphson search (2nd iteration)
+        # Newton-Raphson search (2nd iteration) — capture locally to guard NaN
         # state.τf[i] already contains total stress from 1st iteration, no conversion needed
-        state.Vf[i], state.τf[i] = nr_search(
+        Vf_2nd, τf_2nd = nr_search(
             state.τf[i],          # Already total stress from 1st iteration
             params.fo,
             params.Vo,
@@ -188,6 +195,15 @@ function dynamic_step!(state, solver::DynamicSolver{T}, mesh, physics, ics,
             fault_z[i],
             state.fault_vfree[i]
         )
+
+        if isnan(Vf_2nd) || isnan(τf_2nd)
+            # 2nd NR failed — keep 1st iteration results and restore ψ
+            state.ψ[i] = ψ_after_first
+            @warn "NR 2nd iteration produced NaN, keeping 1st iteration result" location=i
+        else
+            state.Vf[i] = Vf_2nd
+            state.τf[i] = τf_2nd
+        end
     end
 
     # Convert fault stress to perturbation from initial stress

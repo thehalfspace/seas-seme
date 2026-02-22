@@ -56,6 +56,64 @@ end
 
 
 """
+    _finish_simulation(config, mesh, physics, ics, params, state, qs_solver, dyn_solver,
+                       dt_min, M_global, K_el, log_io, label)
+
+Shared tail for both builder variants: configure timestepper, save parameters,
+create IO manager, and print summary. Called after all formulation-specific steps.
+"""
+function _finish_simulation(config, mesh, physics, ics, params, state, qs_solver,
+                             dyn_solver, dt_min, M_global, K_el, log_io, label)
+    T = eltype(M_global)
+
+    # 7. Build timestepper
+    println("\n[7] Configuring timestepper...")
+    hcell = minimum(diff(mesh.boundaries.fault.coords[2,:]))
+    timestepper = AdaptiveTimestepper(
+        dt_min,
+        T(config.solvers.dt_max),
+        hcell,
+        physics.μ,
+        T(config.solvers.dynamic.velocity_threshold_qs_to_dyn),
+        T(config.solvers.dynamic.velocity_threshold_dyn_to_qs)
+    )
+    @printf("  Adaptive timestepping configured\n")
+    @printf("  dt_min: %.3e s, dt_max: %.3e s\n", dt_min, config.solvers.dt_max)
+
+    # 8. Save initial parameters
+    println("\n[8] Saving initial parameters...")
+    save_initial_parameters(config, ics, mesh)
+    @printf("  Parameters saved to: %s\n", joinpath(config.simulation.output_dir, "params"))
+
+    # 9. Create I/O manager
+    io_manager = create_io_manager(config, mesh)
+
+    println("\n" * "="^80)
+    println("Simulation built successfully! ($label)")
+    println("="^80)
+    println("\nSimulation directory: $(config.simulation.output_dir)")
+    println("├── config.toml")
+    println("├── output.log")
+    println("├── params/")
+    println("│   ├── friction_parameters.dat")
+    println("│   ├── initial_stress.dat")
+    println("│   └── fault_coordinates.dat")
+    println("├── outputs/")
+    println("│   └── $(config.simulation.name).h5")
+    println("└── checkpoints/")
+    println("\nMesh: $(config.mesh.file)")
+    println("  $(mesh.n_elements) elements, polynomial degree $(mesh.polynomial_degree)")
+    println("="^80)
+
+    return Simulation(
+        config, mesh, physics, ics, params,
+        state, qs_solver, dyn_solver, timestepper,
+        io_manager, log_io, M_global, K_el
+    )
+end
+
+
+"""
     build_simulation(config::SimulationConfig; T=Float64) -> Simulation{T}
 
 Build complete simulation from configuration.
@@ -182,58 +240,17 @@ function build_simulation_antiplane(config::SimulationConfig; T::Type=Float64)
     dyn_solver = DynamicSolver(dt_min, verbose=false)
     @printf("  Dynamic solver built (leap-frog)\n")
 
-    # 7. Build timestepper
-    println("\n[7/8] Configuring timestepper...")
-    hcell = minimum(diff(mesh.boundaries.fault.coords[2,:]))
-    timestepper = AdaptiveTimestepper(
-        dt_min,
-        T(config.solvers.dt_max),
-        hcell,
-        physics.μ,
-        T(config.solvers.dynamic.velocity_threshold_qs_to_dyn),
-        T(config.solvers.dynamic.velocity_threshold_dyn_to_qs)
-    )
-    @printf("  Adaptive timestepping configured\n")
-    @printf("  dt_min: %.3e s, dt_max: %.3e s\n", dt_min, config.solvers.dt_max)
-
-    # 8. Initialize simulation state
-    println("\n[8/8] Initializing simulation state...")
+    # 6b. Initialize simulation state
+    println("\n[6b] Initializing simulation state...")
     # v_init = Vpl/2 so that Vf = 2*v_init = Vpl (steady state, consistent with τ⁰)
     v_init_val = T(params.Vpl) / 2
     state = SimulationState(mesh, ics, params, v_init=v_init_val)
     @printf("  Simulation state initialized (v_init = %.3e m/s)\n", v_init_val)
     @printf("  Initial max slip rate: %.3e m/s\n", maximum_fault_slip_rate(state))
 
-    # 9. Save initial parameters
-    println("\n[9/9] Saving initial parameters...")
-    save_initial_parameters(config, ics, mesh)
-    @printf("  Parameters saved to: %s\n", joinpath(config.simulation.output_dir, "params"))
-
-    # 10. Create I/O manager
-    io_manager = create_io_manager(config, mesh)
-
-    println("\n" * "="^80)
-    println("Simulation built successfully! (Antiplane)")
-    println("="^80)
-    println("\nSimulation directory: $(config.simulation.output_dir)")
-    println("├── config.toml")
-    println("├── output.log")
-    println("├── params/")
-    println("│   ├── friction_parameters.dat")
-    println("│   ├── initial_stress.dat")
-    println("│   └── fault_coordinates.dat")
-    println("├── outputs/")
-    println("│   └── $(config.simulation.name).h5")
-    println("└── checkpoints/")
-    println("\nMesh: $(config.mesh.file)")
-    println("  $(mesh.n_elements) elements, polynomial degree $(mesh.polynomial_degree)")
-    println("="^80)
-
-    return Simulation(
-        config, mesh, physics, ics, params,
-        state, qs_solver, dyn_solver, timestepper,
-        io_manager, log_io, M_global, K_el
-    )
+    return _finish_simulation(config, mesh, physics, ics, params, state,
+                              qs_solver, dyn_solver, dt_min, M_global, K_el,
+                              log_io, "Antiplane")
 end
 
 
@@ -357,56 +374,17 @@ function build_simulation_plane_strain(config::SimulationConfig; T::Type=Float64
     dyn_solver = DynamicSolverPlaneStrain(dt_min, verbose=false)
     @printf("  Plane-strain dynamic solver built (leap-frog)\n")
 
-    # 7. Build timestepper
-    println("\n[7/9] Configuring timestepper...")
-    timestepper = AdaptiveTimestepper(
-        dt_min,
-        T(config.solvers.dt_max),
-        hcell,
-        physics.μ,
-        T(config.solvers.dynamic.velocity_threshold_qs_to_dyn),
-        T(config.solvers.dynamic.velocity_threshold_dyn_to_qs)
-    )
-    @printf("  Adaptive timestepping configured\n")
-    @printf("  dt_min: %.3e s, dt_max: %.3e s\n", dt_min, config.solvers.dt_max)
-
-    # 8. Initialize simulation state
-    println("\n[8/9] Initializing simulation state...")
+    # 6b. Initialize simulation state
+    println("\n[6b] Initializing simulation state...")
     # v_init = Vpl_eff/2 so that Vf = 2*v_init = Vpl_eff (steady state, consistent with τ⁰)
     v_init_val = T(Vpl_eff) / 2
     state = SimulationStatePlaneStrain(mesh, ics, params, v_init=v_init_val)
     @printf("  Plane-strain simulation state initialized (v_init = %.3e m/s)\n", v_init_val)
     @printf("  Initial max slip rate: %.3e m/s\n", maximum_fault_slip_rate(state))
+    @printf("  Formulation: plane-strain, dip angle: %.1f°, loading: %s\n",
+            config.physics.dip_angle, config.physics.loading_direction)
 
-    # 9. Save initial parameters
-    println("\n[9/9] Saving initial parameters...")
-    save_initial_parameters(config, ics, mesh)
-    @printf("  Parameters saved to: %s\n", joinpath(config.simulation.output_dir, "params"))
-
-    # 10. Create I/O manager
-    io_manager = create_io_manager(config, mesh)
-
-    println("\n" * "="^80)
-    println("Simulation built successfully! (Plane-Strain)")
-    println("="^80)
-    println("\nSimulation directory: $(config.simulation.output_dir)")
-    println("├── config.toml")
-    println("├── output.log")
-    println("├── params/")
-    println("│   ├── friction_parameters.dat")
-    println("│   ├── initial_stress.dat")
-    println("│   └── fault_coordinates.dat")
-    println("├── outputs/")
-    println("│   └── $(config.simulation.name).h5")
-    println("└── checkpoints/")
-    println("\nMesh: $(config.mesh.file)")
-    println("  $(mesh.n_elements) elements, polynomial degree $(mesh.polynomial_degree)")
-    println("  Formulation: plane-strain, dip angle: $(config.physics.dip_angle)°, loading: $(config.physics.loading_direction)")
-    println("="^80)
-
-    return Simulation(
-        config, mesh, physics, ics, params,
-        state, qs_solver, dyn_solver, timestepper,
-        io_manager, log_io, M_global, K_el
-    )
+    return _finish_simulation(config, mesh, physics, ics, params, state,
+                              qs_solver, dyn_solver, dt_min, M_global, K_el,
+                              log_io, "Plane-Strain")
 end

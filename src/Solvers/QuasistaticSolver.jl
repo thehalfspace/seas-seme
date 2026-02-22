@@ -232,8 +232,22 @@ function quasistatic_step!(state, solver::QuasistaticSolver, mesh, physics,
 
     # Update global velocity from displacement change
     state.v .= (state.u .- state.u_prev) ./ dt
+
+    # Safety: clamp velocity to physical bounds (shear wave velocity)
+    # Prevents unphysical spikes from CG errors amplified by small dt
+    clamp!(state.v, -physics.vs, physics.vs)
+
+    # Re-enforce boundary velocities
     state.v[fault_id] .= 0.5 .* (Vf_new .- params.Vpl)
     state.v[creep_id] .= 0
+
+    # Blowup detection
+    v_max = maximum(abs.(state.v))
+    u_max = maximum(abs.(state.u))
+    if v_max > 1e10 || u_max > 1e10
+        @error "QS blowup detected" v_max u_max dt iteration=state.iteration
+        error("Quasistatic solver produced non-physical values")
+    end
 
     # Zero out prescribed boundary accelerations
     fill!(state.a, zero(eltype(state.a)))
