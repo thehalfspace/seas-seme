@@ -1,7 +1,7 @@
 #!/usr/bin/env julia
 
 """
-run_simulation.jl - Main entry point for SEAS-SEME simulations
+ Simulation.jl - Main entry point for SEAS-SEME simulations
 
 Run a complete earthquake cycle simulation from a configuration file.
 
@@ -38,15 +38,23 @@ using Printf
 
 function main()
     # Parse command line arguments
-    if length(ARGS) < 1
-        println("Usage: julia run_simulation.jl <config_file>")
+    args = collect(ARGS)
+    use_gpu = "--gpu" in args
+    filter!(a -> a != "--gpu", args)
+
+    if length(args) < 1
+        println("Usage: julia run_simulation.jl [--gpu] <config_file>")
+        println()
+        println("Options:")
+        println("  --gpu    Use GPU acceleration (CUDA + AMGX)")
         println()
         println("Example:")
-        println("  julia run_simulation.jl examples/config/strike_slip_2d.toml")
+        println("  julia run_simulation.jl config/strike_slip_2d.toml")
+        println("  julia run_simulation.jl --gpu config/strike_slip_2d.toml")
         exit(1)
     end
 
-    config_file = ARGS[1]
+    config_file = args[1]
 
     # Verify config file exists
     if !isfile(config_file)
@@ -60,6 +68,7 @@ function main()
     println("="^80)
     @printf("Configuration: %s\n", config_file)
     @printf("Julia threads: %d\n", Threads.nthreads())
+    @printf("GPU mode: %s\n", use_gpu ? "enabled" : "disabled")
     println("="^80)
     println()
 
@@ -73,7 +82,7 @@ function main()
 
     # Build simulation
     println("\nBuilding simulation...")
-    simulation = build_simulation(config)
+    simulation = build_simulation(config; use_gpu=use_gpu)
     println("✓ Simulation built")
 
     # Run simulation

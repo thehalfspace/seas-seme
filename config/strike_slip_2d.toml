@@ -14,7 +14,6 @@ output_dir = "./data"               # Base output directory (simulation folder c
 
 [mesh]
 file = "./data/mesh/homogeneous/homogeneous.mesh"     # HOHQMesh mesh file
-#file = "./data/mesh/amr/unstructured_amr.mesh"     # HOHQMesh mesh file
 polynomial_degree = 4               # Spectral element polynomial degree (p=4)
 
 [physics]
