@@ -32,6 +32,18 @@ julia --project=. examples/scripts/run_simulation.jl config.toml
 - Log file: `<output_dir>/<simulation_name>.log`
 """
 
+# Manually set the AMGX.jl path because it was giving issues
+using Libdl
+
+const LIB_PATH = "/oscar/scratch/pthakur8/sem/seas-seme/deps/amgx/build/libamgxsh.so"
+if isfile(LIBAMGX_PATH)
+    dlopen(LIBAMGX_PATH, RTLD_GLOBAL)
+else
+    @error "Unable to set up AMGX lib path"
+end
+
+
+
 using SEAS_SEME
 using Printf
 

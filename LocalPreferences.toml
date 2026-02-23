@@ -1,3 +1,7 @@
+[AMGX]
+libamgx_path = "/oscar/scratch/pthakur8/sem/seas-seme/deps/amgx/build/libamgxsh.so"
+libAMGX = "/oscar/scratch/pthakur8/sem/seas-seme/deps/amgx/build/libamgxsh.so"
+
 [CUDA_Runtime_jll]
 __clear__ = ["version"]
 local = "true"
