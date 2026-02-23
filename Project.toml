@@ -2,6 +2,9 @@ name = "SEAS_SEME"
 uuid = "b8e7c8a0-1234-5678-9abc-def012345678"
 version = "0.1.0"
 
+[compat]
+AMGX = "0.2.0"
+
 [deps]
 AMGX = "c963dde9-0319-47f5-bf0c-b07d3c80ffa6"
 AlgebraicMultigrid = "2169fc97-5a83-5252-b627-83903c6c433c"
@@ -27,5 +30,5 @@ StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
 TOML = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
 Trixi = "a7f1ee26-1774-49b1-8366-f1abc58fbfcb"
 
-[compat]
-AMGX = "0.2.0"
+[extras]
+CUDA_Runtime_jll = "76a88914-d11a-5bdc-97e0-2f5a05c973a2"
