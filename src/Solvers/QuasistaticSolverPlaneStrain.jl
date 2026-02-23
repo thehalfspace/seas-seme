@@ -265,3 +265,199 @@ function quasistatic_step!(state::SimulationStatePlaneStrain{T},
 
     return nothing
 end
+
+
+# ============================================================================
+# GPU quasi-static solver (plane-strain) using AMGX PCG+AMG
+# ============================================================================
+
+"""
+    build_quasistatic_solver_gpu_plane_strain(weights, H, Ht, dof_id, mesh, fltni; ...)
+
+Build a GPU quasi-static solver for plane-strain using AMGX PCG+AMG.
+"""
+function build_quasistatic_solver_gpu_plane_strain(
+    weights::MetricWeightsPlaneStrain{T},
+    H::Matrix{T},
+    Ht::Matrix{T},
+    dof_id::Array{Int,3},
+    mesh,
+    fltni::Vector{Int};
+    tolerance::T=T(1e-8),
+    amgx_config_str::String=DEFAULT_AMGX_CONFIG
+) where T<:AbstractFloat
+
+    println("Building plane-strain GPU AMGX PCG+AMG solver...")
+    ndof = mesh.ndof
+
+    K_sparse = stiffness_assembly_plane_strain(weights, H, Ht, dof_id, ndof)
+    K_reduced = K_sparse[fltni, fltni]
+
+    return _build_amgx_solver(K_reduced, fltni, tolerance, amgx_config_str)
+end
+
+
+"""
+    quasistatic_step!(state::SimulationStatePlaneStrain, solver::QuasistaticSolverGPU, ...)
+
+GPU quasi-static step for plane-strain using AMGX.
+Fault NR loop runs on CPU; matvec runs on GPU via CuArray dispatch.
+"""
+function quasistatic_step!(state::SimulationStatePlaneStrain{T},
+                           solver::QuasistaticSolverGPU{T},
+                           mesh, physics, ics, params, dt,
+                           weights_gpu, H_gpu, Ht_gpu, dof_id_gpu, M_global_gpu) where T
+
+    fault_id = mesh.boundaries.fault.node_ids
+    creep_id = mesh.boundaries.creep.node_ids
+    fault_matrix = mesh.boundaries.fault.matrix
+    mask = mesh.active_fault_mask
+    ndof = state.ndof
+    tangent = state.fault_tangent   # CPU matrix [2, nfault]
+
+    copyto!(state.u_prev, state.u)
+    copyto!(state.v_prev, state.v)
+
+    # Compute Vf_old on CPU (tangential velocity projection, fault nodes only)
+    v_prev_cpu = Array(state.v_prev)
+    Vf_old = get_fault_tangential_velocity(v_prev_cpu, fault_id, tangent, ndof, params.Vpl)
+    Vf_new = copy(Vf_old)
+
+    if state.iteration == 0
+        v_cpu0 = Array(state.v)
+        Vf_old .= get_fault_tangential_velocity(v_cpu0, fault_id, tangent, ndof, params.Vpl)
+        Vf_new .= copy(Vf_old)
+    end
+
+    fltni_gpu = solver.fltni_gpu
+
+    # Pre-download boundary arrays once (small, used in every pass)
+    u_prev_fault_x = Array(state.u_prev[fault_id])
+    u_prev_fault_y = Array(state.u_prev[ndof .+ fault_id])
+    u_prev_creep_x = Array(state.u_prev[creep_id])
+    u_prev_creep_y = Array(state.u_prev[ndof .+ creep_id])
+
+    for pass in 1:2
+        # Step 1: Prescribed displacement on boundaries.
+        # Download v at boundary nodes, compute prescribed u, scatter-upload.
+        fill!(state.f, zero(T))
+        v_fault_x = Array(state.v[fault_id])
+        v_fault_y = Array(state.v[ndof .+ fault_id])
+        v_creep_x = Array(state.v[creep_id])
+        v_creep_y = Array(state.v[ndof .+ creep_id])
+
+        f_fault_x = u_prev_fault_x .+ v_fault_x .* dt
+        f_fault_y = u_prev_fault_y .+ v_fault_y .* dt
+        f_creep_x = u_prev_creep_x .+ v_creep_x .* dt
+        f_creep_y = u_prev_creep_y .+ v_creep_y .* dt
+
+        state.f[fault_id]        .= CuArray(f_fault_x)
+        state.f[ndof .+ fault_id] .= CuArray(f_fault_y)
+        state.f[creep_id]        .= CuArray(f_creep_x)
+        state.f[ndof .+ creep_id] .= CuArray(f_creep_y)
+
+        # Step 2: K*f (GPU kernel) → RHS for AMGX
+        apply_stiffness_plane_strain!(state.a, state.f, weights_gpu, H_gpu, Ht_gpu,
+                                      dof_id_gpu, mesh.n_elements, ndof)
+        rhs_gpu = Array(state.a[fltni_gpu])
+
+        x0_gpu = Array(state.u_prev[fltni_gpu])
+        AMGX.upload!(solver.b_buf, -rhs_gpu)
+        AMGX.upload!(solver.x_buf, x0_gpu)
+        AMGX.solve!(solver.x_buf, solver.amgx_solver, solver.b_buf)
+
+        u_sol_cpu = AMGX.download(solver.x_buf)
+        if any(isnan.(u_sol_cpu)) || any(isinf.(u_sol_cpu))
+            @error "Non-finite values in PS AMGX solution" pass iteration=state.iteration
+            error("AMGX solver produced non-finite values")
+        end
+        state.u[fltni_gpu] .= CuArray(u_sol_cpu)
+
+        # Enforce prescribed displacements (scatter-upload)
+        state.u[fault_id]        .= CuArray(f_fault_x)
+        state.u[ndof .+ fault_id] .= CuArray(f_fault_y)
+        state.u[creep_id]        .= CuArray(f_creep_x)
+        state.u[ndof .+ creep_id] .= CuArray(f_creep_y)
+
+        # Step 3: Compute fault traction from K*u (GPU kernel)
+        fill!(state.a, zero(T))
+        apply_stiffness_plane_strain!(state.a, state.u, weights_gpu, H_gpu, Ht_gpu,
+                                      dof_id_gpu, mesh.n_elements, ndof)
+        state.a[creep_id] .= 0
+        state.a[ndof .+ creep_id] .= 0
+
+        # Extract traction on CPU
+        a_cpu = Array(state.a)
+        τf_new, σn_pert = fault_traction_from_force_plane_strain(
+            a_cpu, fault_id, fault_matrix, tangent, state.fault_normal, ndof
+        )
+        copyto!(state.τf, CuArray(τf_new))
+        copyto!(state.σn_perturbation, CuArray(σn_pert))
+
+        # Steps 4 & 5: Rate-state evolution (CPU)
+        ψ_cpu = Array(state.ψ)
+
+        for i in eachindex(fault_id)
+            if !mask[i]
+                Vf_new[i] = params.Vpl
+                continue
+            end
+
+            ψ_cpu[i] = state_time_evolution(ψ_cpu[i], Vf_new[i], dt,
+                                            ics.friction.Lc[i], params.Vo)
+            Vf_new[i] = fault_slip_rate(ψ_cpu[i], τf_new[i],
+                                        ics.τo[i], ics.σo[i],
+                                        ics.friction.a[i], ics.friction.b[i],
+                                        params.Vo, params.fo)
+
+            if !isfinite(Vf_new[i]) && state.iteration == 1
+                @error "Non-finite slip rate at fault node" i pass
+                error("Non-finite slip rate computed")
+            end
+        end
+
+        copyto!(state.ψ, CuArray(ψ_cpu))
+
+        # Average slip rates
+        Vf_new .= 0.5 .* (Vf_old .+ Vf_new)
+
+        # Update fault velocity: project Vf onto tangent, upload full v vector
+        v_cpu_full = Array(state.v)
+        set_fault_velocity_plane_strain!(v_cpu_full, fault_id, Vf_new, params.Vpl, tangent, ndof)
+        for nid in creep_id
+            v_cpu_full[nid]        = zero(T)
+            v_cpu_full[ndof + nid] = zero(T)
+        end
+        copyto!(state.v, CuArray(v_cpu_full))
+    end  # Two-pass iteration
+
+    # Update velocity from displacement change
+    state.v .= (state.u .- state.u_prev) ./ dt
+    clamp!(state.v, -physics.vs, physics.vs)
+
+    # Re-enforce boundary velocities (download full v, modify, upload)
+    v_cpu_final = Array(state.v)
+    set_fault_velocity_plane_strain!(v_cpu_final, fault_id, Vf_new, params.Vpl, tangent, ndof)
+    for nid in creep_id
+        v_cpu_final[nid]        = zero(T)
+        v_cpu_final[ndof + nid] = zero(T)
+    end
+    copyto!(state.v, CuArray(v_cpu_final))
+
+    v_max = maximum(abs.(Array(state.v)))
+    u_max = maximum(abs.(Array(state.u)))
+    if v_max > 1e10 || u_max > 1e10
+        @error "PS-GPU-QS blowup detected" v_max u_max dt iteration=state.iteration
+        error("GPU plane-strain quasistatic solver produced non-physical values")
+    end
+
+    fill!(state.a, zero(T))
+    state.u[creep_id]        .= zero(T)
+    state.u[ndof .+ creep_id] .= zero(T)
+    state.v[creep_id]        .= zero(T)
+    state.v[ndof .+ creep_id] .= zero(T)
+
+    copyto!(state.Vf, CuArray(Vf_new))
+
+    return nothing
+end

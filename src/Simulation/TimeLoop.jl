@@ -97,14 +97,21 @@ function run!(simulation)
                 state.timestep = total_time - state.time
             end
 
-            # Take time step (dispatches on state type via multiple dispatch)
+            # Take time step (dispatches on state type and solver type)
             if state.solver_mode == :quasistatic
-                quasistatic_step!(state, qs_solver, mesh, physics, ics, params,
-                                 state.timestep)
+                if simulation.use_gpu && isa(qs_solver, QuasistaticSolverGPU)
+                    quasistatic_step!(state, qs_solver, mesh, physics, ics, params,
+                                     state.timestep, simulation.weights,
+                                     simulation.H, simulation.Ht, simulation.dof_id,
+                                     simulation.M_global)
+                else
+                    quasistatic_step!(state, qs_solver, mesh, physics, ics, params,
+                                     state.timestep)
+                end
             else  # :dynamic
                 dynamic_step!(state, dyn_solver, mesh, physics, ics, params,
                              simulation.M_global, simulation.weights,
-                             simulation.H, simulation.Ht, mesh.dof_id)
+                             simulation.H, simulation.Ht, simulation.dof_id)
             end
 
             # Update time
@@ -154,7 +161,7 @@ function run!(simulation)
             end
 
             # Check for NaN/Inf
-            if !isfinite(Vf_max) || !all(isfinite.(state.u))
+            if !isfinite(Vf_max) || !all(isfinite, state.u isa Vector ? state.u : Array(state.u))
                 @error "Non-finite values detected" Vf_max iter=state.iteration
                 save_checkpoint!(simulation, config, emergency=true)
                 error("Simulation failed due to non-finite values")

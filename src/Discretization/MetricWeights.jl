@@ -29,11 +29,15 @@ These match the 3 "elastic constants" arrays in the Fortran sem2dpack reference
 - `n_elements::Int`: Number of elements
 - `nnodes::Int`: Nodes per direction (polynomial_degree + 1)
 """
-struct MetricWeightsAntiplane{T<:AbstractFloat}
-    g::Array{T,4}     # [nnodes, nnodes, 3, n_elements]
+struct MetricWeightsAntiplane{T<:AbstractFloat, A<:AbstractArray{T,4}}
+    g::A              # [nnodes, nnodes, 3, n_elements]
     n_elements::Int
     nnodes::Int
 end
+
+# Inner constructor for CPU path (default)
+MetricWeightsAntiplane{T}(g::Array{T,4}, n_elements::Int, nnodes::Int) where {T<:AbstractFloat} =
+    MetricWeightsAntiplane{T, Array{T,4}}(g, n_elements, nnodes)
 
 """
     MetricWeightsPlaneStrain{T}
@@ -62,11 +66,15 @@ Component layout (following sem2dpack a(:,:,1..10)):
 - `n_elements::Int`: Number of elements
 - `nnodes::Int`: Nodes per direction (polynomial_degree + 1)
 """
-struct MetricWeightsPlaneStrain{T<:AbstractFloat}
-    g::Array{T,4}     # [nnodes, nnodes, 10, n_elements]
+struct MetricWeightsPlaneStrain{T<:AbstractFloat, A<:AbstractArray{T,4}}
+    g::A              # [nnodes, nnodes, 10, n_elements]
     n_elements::Int
     nnodes::Int
 end
+
+# Inner constructor for CPU path (default)
+MetricWeightsPlaneStrain{T}(g::Array{T,4}, n_elements::Int, nnodes::Int) where {T<:AbstractFloat} =
+    MetricWeightsPlaneStrain{T, Array{T,4}}(g, n_elements, nnodes)
 
 
 """
@@ -624,4 +632,46 @@ function materialize_K_el_plane_strain(
     end
 
     return K_el
+end
+
+
+# ============================================================================
+# GPU helpers: upload/download metric weights
+# ============================================================================
+
+"""
+    gpu(w::MetricWeightsAntiplane) -> MetricWeightsAntiplane with CuArray g
+
+Upload metric weight array to GPU. Returns a new MetricWeightsAntiplane where
+`g` is a CuArray. Requires CUDA.jl to be loaded.
+"""
+function gpu(w::MetricWeightsAntiplane{T}) where T
+    g_cu = CuArray(w.g)
+    return MetricWeightsAntiplane{T, typeof(g_cu)}(g_cu, w.n_elements, w.nnodes)
+end
+
+"""
+    gpu(w::MetricWeightsPlaneStrain) -> MetricWeightsPlaneStrain with CuArray g
+"""
+function gpu(w::MetricWeightsPlaneStrain{T}) where T
+    g_cu = CuArray(w.g)
+    return MetricWeightsPlaneStrain{T, typeof(g_cu)}(g_cu, w.n_elements, w.nnodes)
+end
+
+"""
+    cpu(w::MetricWeightsAntiplane) -> MetricWeightsAntiplane with CPU Array g
+
+Download metric weight array from GPU to CPU.
+"""
+function cpu(w::MetricWeightsAntiplane{T}) where T
+    g_cpu = Array(w.g)
+    return MetricWeightsAntiplane{T, Array{T,4}}(g_cpu, w.n_elements, w.nnodes)
+end
+
+"""
+    cpu(w::MetricWeightsPlaneStrain) -> MetricWeightsPlaneStrain with CPU Array g
+"""
+function cpu(w::MetricWeightsPlaneStrain{T}) where T
+    g_cpu = Array(w.g)
+    return MetricWeightsPlaneStrain{T, Array{T,4}}(g_cpu, w.n_elements, w.nnodes)
 end

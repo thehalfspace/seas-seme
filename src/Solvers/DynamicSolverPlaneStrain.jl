@@ -55,10 +55,10 @@ Perform one dynamic time step using leap-frog integration (plane-strain).
 function dynamic_step!(state::SimulationStatePlaneStrain{T},
                        solver::DynamicSolverPlaneStrain{T},
                        mesh, physics, ics, params,
-                       M_global::Vector{T},
+                       M_global::AbstractVector{T},
                        weights::MetricWeightsPlaneStrain{T},
-                       H::Matrix{T}, Ht::Matrix{T},
-                       dof_id::Array{Int,3}) where T<:AbstractFloat
+                       H::AbstractMatrix{T}, Ht::AbstractMatrix{T},
+                       dof_id::AbstractArray{<:Integer,3}) where T<:AbstractFloat
 
     dt = solver.dt_min
     ndof = state.ndof
@@ -99,29 +99,49 @@ function dynamic_step!(state::SimulationStatePlaneStrain{T},
 
     # Step 4: Absorbing BC (S-wave damping for both components)
     # Phase 1: simplified — treat as scalar impedance per component
-    @inbounds for i in eachindex(absorbing_id)
-        nid = absorbing_id[i]
-        state.a[nid]        -= absorb_matrix[i] * state.v[nid]
-        state.a[ndof + nid] -= absorb_matrix[i] * state.v[ndof + nid]
+    # For GPU: download absorbing nodes, modify, upload (absorbing_id is small)
+    if !(state.a isa Vector)
+        a_abs_x = Array(state.a[absorbing_id])
+        a_abs_y = Array(state.a[ndof .+ absorbing_id])
+        v_abs_x = Array(state.v[absorbing_id])
+        v_abs_y = Array(state.v[ndof .+ absorbing_id])
+        for i in eachindex(absorbing_id)
+            a_abs_x[i] -= absorb_matrix[i] * v_abs_x[i]
+            a_abs_y[i] -= absorb_matrix[i] * v_abs_y[i]
+        end
+        state.a[absorbing_id]        .= CuArray(a_abs_x)
+        state.a[ndof .+ absorbing_id] .= CuArray(a_abs_y)
+    else
+        @inbounds for i in eachindex(absorbing_id)
+            nid = absorbing_id[i]
+            state.a[nid]        -= absorb_matrix[i] * state.v[nid]
+            state.a[ndof + nid] -= absorb_matrix[i] * state.v[ndof + nid]
+        end
     end
 
     # Step 5: Compute stick traction (tangential free velocity)
-    state.fault_vfree .= compute_stick_traction_plane_strain(
+    # compute_stick_traction_plane_strain downloads from GPU internally
+    fault_vfree_cpu = compute_stick_traction_plane_strain(
         state.v, state.a, M_global, fault_id, tangent, ndof, dt
     )
 
-    # Previous fault slip rate (tangential)
+    # Previous fault slip rate (tangential) — downloads GPU arrays internally
     Vf_prev = get_fault_tangential_velocity(state.v_prev, fault_id, tangent, ndof, params.Vpl)
 
-    # Workspace for two-iteration NR
-    Vf_first_iter = similar(state.Vf)
+    # Download fault-size arrays to CPU for NR loop
+    ψ_cpu   = Array(state.ψ)
+    Vf_cpu  = Array(state.Vf)
+    τf_cpu  = Array(state.τf)
 
-    # Steps 5-7: Solve nonlinear fault boundary equations
+    # Workspace for two-iteration NR
+    Vf_first_iter = similar(Vf_cpu)
+
+    # Steps 5-7: Solve nonlinear fault boundary equations (CPU loop)
     for i in eachindex(fault_id)
         if !mask[i]
             # Excluded endpoint: lock to plate rate, no state evolution
-            state.Vf[i] = params.Vpl
-            state.τf[i] = ics.τo[i]  # total stress = initial (no perturbation)
+            Vf_cpu[i] = params.Vpl
+            τf_cpu[i] = ics.τo[i]  # total stress = initial (no perturbation)
             Vf_first_iter[i] = params.Vpl
             continue
         end
@@ -132,59 +152,66 @@ function dynamic_step!(state::SimulationStatePlaneStrain{T},
         σn_eff = ics.σo[i]
 
         # Save ψ before update so we can restore on NR failure
-        ψ_saved = state.ψ[i]
+        ψ_saved = ψ_cpu[i]
 
         # Update state variable
-        state.ψ[i] = state_time_evolution(state.ψ[i], Vf_prev[i], dt,
-                                         ics.friction.Lc[i], params.Vo)
+        ψ_cpu[i] = state_time_evolution(ψ_cpu[i], Vf_prev[i], dt,
+                                        ics.friction.Lc[i], params.Vo)
 
         Vf_first_iter[i] = Vf_prev[i]
 
         # Convert perturbation stress to total for NR
-        τ_total_guess = state.τf[i] + ics.τo[i]
+        τ_total_guess = τf_cpu[i] + ics.τo[i]
 
         # Newton-Raphson search (1st iteration)
-        state.Vf[i], state.τf[i] = nr_search(
+        Vf_cpu[i], τf_cpu[i] = nr_search(
             τ_total_guess, params.fo, params.Vo,
             ics.friction.a[i], ics.friction.b[i], σn_eff,
-            ics.τo[i], state.ψ[i], fault_z[i], state.fault_vfree[i]
+            ics.τo[i], ψ_cpu[i], fault_z[i], fault_vfree_cpu[i]
         )
 
-        if isnan(state.Vf[i]) || isnan(state.τf[i])
+        if isnan(Vf_cpu[i]) || isnan(τf_cpu[i])
             # NR failed completely — restore ψ and use previous slip rate
-            state.ψ[i] = ψ_saved
-            state.Vf[i] = Vf_prev[i]
-            state.τf[i] = τ_total_guess - ics.τo[i]
+            ψ_cpu[i] = ψ_saved
+            Vf_cpu[i] = Vf_prev[i]
+            τf_cpu[i] = τ_total_guess - ics.τo[i]
             @warn "NR search produced NaN (plane-strain), restoring previous state" location=i iter=state.iteration
             continue
         end
 
         # 2nd iteration with average slip rate
-        ψ_after_first = state.ψ[i]
-        avg_slip_rate = T(0.5) * (state.Vf[i] + Vf_first_iter[i])
-        state.ψ[i] = state_time_evolution(state.ψ[i], avg_slip_rate, dt,
-                                         ics.friction.Lc[i], params.Vo)
+        ψ_after_first = ψ_cpu[i]
+        avg_slip_rate = T(0.5) * (Vf_cpu[i] + Vf_first_iter[i])
+        ψ_cpu[i] = state_time_evolution(ψ_cpu[i], avg_slip_rate, dt,
+                                        ics.friction.Lc[i], params.Vo)
 
         Vf_2nd, τf_2nd = nr_search(
-            state.τf[i], params.fo, params.Vo,
+            τf_cpu[i], params.fo, params.Vo,
             ics.friction.a[i], ics.friction.b[i], σn_eff,
-            ics.τo[i], state.ψ[i], fault_z[i], state.fault_vfree[i]
+            ics.τo[i], ψ_cpu[i], fault_z[i], fault_vfree_cpu[i]
         )
 
         if isnan(Vf_2nd) || isnan(τf_2nd)
             # 2nd NR failed — keep 1st iteration results and restore ψ
-            state.ψ[i] = ψ_after_first
+            ψ_cpu[i] = ψ_after_first
             @warn "NR 2nd iteration produced NaN, keeping 1st iteration result" location=i
         else
-            state.Vf[i] = Vf_2nd
-            state.τf[i] = τf_2nd
+            Vf_cpu[i] = Vf_2nd
+            τf_cpu[i] = τf_2nd
         end
     end
 
-    # Convert to perturbation stress
-    state.τf .= state.τf .- ics.τo
+    # Upload NR results back to state (CPU or GPU)
+    copyto!(state.ψ, _as_storage(state.ψ, ψ_cpu))
+    copyto!(state.Vf, _as_storage(state.Vf, Vf_cpu))
+    copyto!(state.fault_vfree, _as_storage(state.fault_vfree, fault_vfree_cpu))
+
+    # Convert to perturbation stress and upload
+    τf_pert_cpu = τf_cpu .- ics.τo
+    copyto!(state.τf, _as_storage(state.τf, τf_pert_cpu))
 
     # Step 8: Apply fault traction to force vector (tangential direction)
+    # apply_fault_traction_plane_strain! handles GPU arrays internally
     apply_fault_traction_plane_strain!(state.a, fault_id, fault_matrix, state.τf,
                                        tangent, ndof)
 

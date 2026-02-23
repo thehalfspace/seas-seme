@@ -48,6 +48,7 @@ Hysteresis prevents rapid mode switching.
 # Module exports
 export fault_slip_rate, state_time_evolution, nr_search
 export QuasistaticSolver, build_quasistatic_solver, quasistatic_step!
+export QuasistaticSolverGPU, build_quasistatic_solver_gpu, build_quasistatic_solver_gpu_plane_strain
 export DynamicSolver, dynamic_step!
 export AdaptiveTimestepper, compute_timestep, determine_solver_mode
 
@@ -60,3 +61,19 @@ export apply_fault_traction_plane_strain!
 export compute_fault_impedance_plane_strain
 export set_fault_velocity_plane_strain!
 export get_fault_tangential_velocity
+
+
+# ============================================================================
+# GPU storage helper: convert a CPU array to the same storage type as a target
+# ============================================================================
+
+"""
+    _as_storage(target::AbstractVector, src::Vector) -> storage-matched array
+
+Return `src` converted to the same storage type as `target`.
+- If target is a Vector, returns src as-is.
+- If target is a CuVector, wraps src in CuArray.
+Used for upload-on-demand after CPU NR loops.
+"""
+_as_storage(::Vector, src::Vector) = src
+_as_storage(::CuVector, src::Vector) = CuArray(src)

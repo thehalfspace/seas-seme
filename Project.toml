@@ -3,7 +3,10 @@ uuid = "b8e7c8a0-1234-5678-9abc-def012345678"
 version = "0.1.0"
 
 [deps]
+AMGX = "8e2d8f57-ec12-4f8a-ae3f-96d7d04fc0d8"
 AlgebraicMultigrid = "2169fc97-5a83-5252-b627-83903c6c433c"
+CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
+KernelAbstractions = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
 ArgParse = "c7e460c6-2fb9-53a9-8c5b-16f535851c63"
 CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"

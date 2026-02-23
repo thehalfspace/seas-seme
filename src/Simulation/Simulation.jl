@@ -40,7 +40,7 @@ sim = build_simulation(config)
 run!(sim)
 ```
 """
-struct Simulation{T<:AbstractFloat, S, QS, DS, W}
+struct Simulation{T<:AbstractFloat, S, QS, DS, W, MV<:AbstractVector{T}, HM<:AbstractMatrix{T}, DI<:AbstractArray{<:Integer,3}}
     config::SimulationConfig
     mesh::UnstructuredSEMesh{T}
     physics::MaterialProperties{T}
@@ -52,10 +52,12 @@ struct Simulation{T<:AbstractFloat, S, QS, DS, W}
     timestepper::AdaptiveTimestepper{T}
     io_manager
     log_io::IO
-    M_global::Vector{T}
-    weights::W          # MetricWeightsAntiplane{T} or MetricWeightsPlaneStrain{T}
-    H::Matrix{T}
-    Ht::Matrix{T}
+    M_global::MV        # Vector{T} on CPU, CuVector{T} on GPU
+    weights::W          # MetricWeightsAntiplane/PlaneStrain{T} (g may be CuArray)
+    H::HM               # Matrix{T} on CPU, CuMatrix{T} on GPU
+    Ht::HM
+    dof_id::DI          # Array{Int,3} on CPU, CuArray on GPU
+    use_gpu::Bool
 end
 
 
@@ -67,7 +69,8 @@ Shared tail for both builder variants: configure timestepper, save parameters,
 create IO manager, and print summary. Called after all formulation-specific steps.
 """
 function _finish_simulation(config, mesh, physics, ics, params, state, qs_solver,
-                             dyn_solver, dt_min, M_global, weights, H, Ht, log_io, label)
+                             dyn_solver, dt_min, M_global, weights, H, Ht, dof_id,
+                             log_io, label, use_gpu=false)
     T = eltype(M_global)
 
     # 7. Build timestepper
@@ -112,7 +115,7 @@ function _finish_simulation(config, mesh, physics, ics, params, state, qs_solver
     return Simulation(
         config, mesh, physics, ics, params,
         state, qs_solver, dyn_solver, timestepper,
-        io_manager, log_io, M_global, weights, H, Ht
+        io_manager, log_io, M_global, weights, H, Ht, dof_id, use_gpu
     )
 end
 
@@ -146,11 +149,11 @@ sim = build_simulation(config)
 run!(sim)
 ```
 """
-function build_simulation(config::SimulationConfig; T::Type=Float64)
+function build_simulation(config::SimulationConfig; T::Type=Float64, use_gpu::Bool=false)
     if config.physics.formulation == :plane_strain
-        return build_simulation_plane_strain(config, T=T)
+        return build_simulation_plane_strain(config, T=T, use_gpu=use_gpu)
     else
-        return build_simulation_antiplane(config, T=T)
+        return build_simulation_antiplane(config, T=T, use_gpu=use_gpu)
     end
 end
 
@@ -160,7 +163,7 @@ end
 
 Build antiplane (SH) simulation using tensor-product metric weights.
 """
-function build_simulation_antiplane(config::SimulationConfig; T::Type=Float64)
+function build_simulation_antiplane(config::SimulationConfig; T::Type=Float64, use_gpu::Bool=false)
     # Setup logging to both console and file
     _, log_io = setup_logging(config)
 
@@ -234,15 +237,23 @@ function build_simulation_antiplane(config::SimulationConfig; T::Type=Float64)
     fltni = collect(1:mesh.ndof)
     deleteat!(fltni, sort(unique(interface_id)))
 
-    # Quasi-static solver with AMG preconditioner
-    qs_solver = build_quasistatic_solver(
-        weights, H, Ht, mesh.dof_id, mesh, fltni,
-        tolerance=T(config.solvers.quasistatic.tolerance),
-        max_iterations=config.solvers.quasistatic.max_iterations,
-        amg_max_levels=config.solvers.quasistatic.amg_max_levels,
-        verbose=true
-    )
-    @printf("  Quasi-static solver built (AMG-CG)\n")
+    # Quasi-static solver
+    if use_gpu
+        qs_solver = build_quasistatic_solver_gpu(
+            weights, H, Ht, mesh.dof_id, mesh, fltni,
+            tolerance=T(config.solvers.quasistatic.tolerance)
+        )
+        @printf("  Quasi-static solver built (AMGX GPU PCG+AMG)\n")
+    else
+        qs_solver = build_quasistatic_solver(
+            weights, H, Ht, mesh.dof_id, mesh, fltni,
+            tolerance=T(config.solvers.quasistatic.tolerance),
+            max_iterations=config.solvers.quasistatic.max_iterations,
+            amg_max_levels=config.solvers.quasistatic.amg_max_levels,
+            verbose=true
+        )
+        @printf("  Quasi-static solver built (AMG-CG)\n")
+    end
 
     # Dynamic solver
     dyn_solver = DynamicSolver(dt_min, verbose=false)
@@ -252,13 +263,25 @@ function build_simulation_antiplane(config::SimulationConfig; T::Type=Float64)
     println("\n[6b] Initializing simulation state...")
     # v_init = Vpl/2 so that Vf = 2*v_init = Vpl (steady state, consistent with τ⁰)
     v_init_val = T(params.Vpl) / 2
-    state = SimulationState(mesh, ics, params, v_init=v_init_val)
+    state = SimulationState(mesh, ics, params, v_init=v_init_val, use_gpu=use_gpu)
     @printf("  Simulation state initialized (v_init = %.3e m/s)\n", v_init_val)
     @printf("  Initial max slip rate: %.3e m/s\n", maximum_fault_slip_rate(state))
 
+    # GPU data migration: upload matrices and weights to GPU
+    dof_id = mesh.dof_id
+    if use_gpu
+        println("\n[GPU] Uploading arrays to GPU...")
+        M_global = CuArray(M_global)
+        weights = gpu(weights)
+        H  = CuMatrix(H)
+        Ht = CuMatrix(Ht)
+        dof_id = CuArray(dof_id)
+        @printf("  GPU arrays uploaded (M_global, metric weights, H, Ht, dof_id)\n")
+    end
+
     return _finish_simulation(config, mesh, physics, ics, params, state,
                               qs_solver, dyn_solver, dt_min, M_global, weights, H, Ht,
-                              log_io, "Antiplane")
+                              dof_id, log_io, "Antiplane", use_gpu)
 end
 
 
@@ -268,7 +291,7 @@ end
 Build plane-strain (P-SV) simulation with 2-component displacement.
 Uses tensor-product metric weights for efficient matvec.
 """
-function build_simulation_plane_strain(config::SimulationConfig; T::Type=Float64)
+function build_simulation_plane_strain(config::SimulationConfig; T::Type=Float64, use_gpu::Bool=false)
     _, log_io = setup_logging(config)
 
     println("\n" * "="^80)
@@ -375,14 +398,22 @@ function build_simulation_plane_strain(config::SimulationConfig; T::Type=Float64
     fltni = collect(1:2*ndof)
     deleteat!(fltni, sort(interface_id_2n))
 
-    qs_solver = build_quasistatic_solver_plane_strain(
-        weights, H, Ht, mesh.dof_id, mesh, fltni,
-        tolerance=T(config.solvers.quasistatic.tolerance),
-        max_iterations=config.solvers.quasistatic.max_iterations,
-        amg_max_levels=config.solvers.quasistatic.amg_max_levels,
-        verbose=true
-    )
-    @printf("  Plane-strain quasi-static solver built (AMG-CG)\n")
+    if use_gpu
+        qs_solver = build_quasistatic_solver_gpu_plane_strain(
+            weights, H, Ht, mesh.dof_id, mesh, fltni,
+            tolerance=T(config.solvers.quasistatic.tolerance)
+        )
+        @printf("  Plane-strain quasi-static solver built (AMGX GPU PCG+AMG)\n")
+    else
+        qs_solver = build_quasistatic_solver_plane_strain(
+            weights, H, Ht, mesh.dof_id, mesh, fltni,
+            tolerance=T(config.solvers.quasistatic.tolerance),
+            max_iterations=config.solvers.quasistatic.max_iterations,
+            amg_max_levels=config.solvers.quasistatic.amg_max_levels,
+            verbose=true
+        )
+        @printf("  Plane-strain quasi-static solver built (AMG-CG)\n")
+    end
 
     dyn_solver = DynamicSolverPlaneStrain(dt_min, verbose=false)
     @printf("  Plane-strain dynamic solver built (leap-frog)\n")
@@ -391,13 +422,25 @@ function build_simulation_plane_strain(config::SimulationConfig; T::Type=Float64
     println("\n[6b] Initializing simulation state...")
     # v_init = Vpl_eff/2 so that Vf = 2*v_init = Vpl_eff (steady state, consistent with τ⁰)
     v_init_val = T(Vpl_eff) / 2
-    state = SimulationStatePlaneStrain(mesh, ics, params, v_init=v_init_val)
+    state = SimulationStatePlaneStrain(mesh, ics, params, v_init=v_init_val, use_gpu=use_gpu)
     @printf("  Plane-strain simulation state initialized (v_init = %.3e m/s)\n", v_init_val)
     @printf("  Initial max slip rate: %.3e m/s\n", maximum_fault_slip_rate(state))
     @printf("  Formulation: plane-strain, dip angle: %.1f°, loading: %s\n",
             config.physics.dip_angle, config.physics.loading_direction)
 
+    # GPU data migration: upload matrices and weights to GPU
+    dof_id = mesh.dof_id
+    if use_gpu
+        println("\n[GPU] Uploading arrays to GPU...")
+        M_global = CuArray(M_global)
+        weights = gpu(weights)
+        H  = CuMatrix(H)
+        Ht = CuMatrix(Ht)
+        dof_id = CuArray(dof_id)
+        @printf("  GPU arrays uploaded (M_global, metric weights, H, Ht, dof_id)\n")
+    end
+
     return _finish_simulation(config, mesh, physics, ics, params, state,
                               qs_solver, dyn_solver, dt_min, M_global, weights, H, Ht,
-                              log_io, "Plane-Strain")
+                              dof_id, log_io, "Plane-Strain", use_gpu)
 end

@@ -261,3 +261,275 @@ function quasistatic_step!(state, solver::QuasistaticSolver, mesh, physics,
 
     return nothing
 end
+
+
+# ============================================================================
+# GPU quasi-static solver using AMGX PCG+AMG
+# ============================================================================
+
+"""
+    QuasistaticSolverGPU{T}
+
+GPU quasi-static solver using AMGX PCG+AMG, all on GPU.
+
+# Fields
+- `amgx_solver`: AMGX solver object (PCG with AMG preconditioner)
+- `amgx_matrix`: AMGX matrix wrapping the sparse stiffness
+- `amgx_resources`: AMGX resources (GPU memory pool)
+- `amgx_config`: AMGX configuration
+- `x_buf`: AMGX vector for solution
+- `b_buf`: AMGX vector for RHS
+- `fltni_gpu`: Free DOF indices on GPU
+- `ndof_reduced`: Number of free DOFs
+- `tolerance::T`: Solver tolerance
+"""
+struct QuasistaticSolverGPU{T<:AbstractFloat}
+    amgx_solver
+    amgx_matrix
+    amgx_resources
+    amgx_config
+    x_buf
+    b_buf
+    fltni_gpu::CuVector{Int32}
+    ndof_reduced::Int
+    tolerance::T
+end
+
+
+"""
+    build_quasistatic_solver_gpu(weights, H, Ht, dof_id, mesh, fltni; tolerance, amgx_config_str)
+
+Build a GPU quasi-static solver using AMGX PCG+AMG on GPU.
+
+Assembles the sparse stiffness matrix on CPU, uploads to GPU, and sets up AMGX.
+"""
+function build_quasistatic_solver_gpu(
+    weights::MetricWeightsAntiplane{T},
+    H::Matrix{T},
+    Ht::Matrix{T},
+    dof_id::Array{Int,3},
+    mesh,
+    fltni::Vector{Int};
+    tolerance::T=T(1e-8),
+    amgx_config_str::String=DEFAULT_AMGX_CONFIG
+) where T<:AbstractFloat
+
+    println("Building GPU AMGX PCG+AMG solver...")
+
+    # Assemble sparse stiffness on CPU (one-time cost)
+    K_sparse = stiffness_assembly(weights, H, Ht, dof_id)
+    K_reduced = K_sparse[fltni, fltni]
+
+    return _build_amgx_solver(K_reduced, fltni, tolerance, amgx_config_str)
+end
+
+
+const DEFAULT_AMGX_CONFIG = """{
+    "config_version": 2,
+    "solver": {
+        "solver": "PCG",
+        "preconditioner": {
+            "solver": "AMG",
+            "algorithm": "AGGREGATION",
+            "cycle": "V",
+            "smoother": "BLOCK_JACOBI",
+            "presweeps": 1,
+            "postsweeps": 1,
+            "max_levels": 10,
+            "coarse_solver": "DENSE_LU_SOLVER"
+        },
+        "max_iters": 200,
+        "tolerance": 1e-8,
+        "monitor_residual": 1,
+        "convergence": "RELATIVE_INI_CORE"
+    }
+}"""
+
+
+"""
+    _build_amgx_solver(K_reduced, fltni, tolerance, amgx_config_str)
+
+Internal: initialize AMGX resources, upload matrix, build solver.
+"""
+function _build_amgx_solver(K_reduced, fltni::Vector{Int}, tolerance::T, amgx_config_str::String) where T
+    ndof_reduced = size(K_reduced, 1)
+
+    # Initialize AMGX
+    amgx_config    = AMGX.Config(amgx_config_str)
+    amgx_resources = AMGX.Resources(amgx_config)
+
+    # Upload sparse matrix to GPU (AMGX.jl handles 0-indexing internally)
+    amgx_matrix = AMGX.AMGXMatrix(amgx_resources, AMGX.dDDI)
+    K_cu = CUDA.CUSPARSE.CuSparseMatrixCSR(K_reduced)
+    AMGX.upload!(amgx_matrix, K_cu)
+
+    # Create and setup solver (AMG hierarchy built here)
+    amgx_solver = AMGX.Solver(amgx_resources, AMGX.dDDI, amgx_config)
+    AMGX.setup!(amgx_solver, amgx_matrix)
+
+    # Allocate solution and RHS vectors on GPU
+    x_buf = AMGX.AMGXVector(amgx_resources, AMGX.dDDI)
+    b_buf = AMGX.AMGXVector(amgx_resources, AMGX.dDDI)
+    AMGX.upload!(x_buf, zeros(T, ndof_reduced))
+    AMGX.upload!(b_buf, zeros(T, ndof_reduced))
+
+    fltni_gpu = CuArray(Int32.(fltni))
+
+    println("  AMGX solver initialized ($(ndof_reduced) free DOFs)")
+
+    return QuasistaticSolverGPU{T}(
+        amgx_solver, amgx_matrix, amgx_resources, amgx_config,
+        x_buf, b_buf, fltni_gpu, ndof_reduced, tolerance
+    )
+end
+
+
+"""
+    quasistatic_step!(state, solver::QuasistaticSolverGPU, mesh, physics, ics, params, dt,
+                      weights_gpu, H_gpu, Ht_gpu, dof_id_gpu, M_global_gpu)
+
+GPU quasi-static step using AMGX PCG+AMG.
+
+Key differences from CPU path:
+- CG replaced by AMGX.solve! (PCG+AMG fully on GPU)
+- Fault NR loop runs on CPU: download ~1-2k fault arrays, run NR, upload back
+- apply_stiffness! dispatches to GPU kernel via CuArray type
+"""
+function quasistatic_step!(state, solver::QuasistaticSolverGPU{T}, mesh, physics,
+                           ics, params, dt,
+                           weights_gpu, H_gpu, Ht_gpu, dof_id_gpu, M_global_gpu) where T
+    fault_id = mesh.boundaries.fault.node_ids
+    creep_id = mesh.boundaries.creep.node_ids
+    fault_matrix = mesh.boundaries.fault.matrix
+    ndof = mesh.ndof
+
+    # Store previous state (GPU broadcast, zero-alloc)
+    copyto!(state.u_prev, state.u)
+    copyto!(state.v_prev, state.v)
+
+    # Compute Vf_old on CPU (download fault-only arrays)
+    v_fault_cpu = Array(state.v_prev[fault_id])
+    Vf_old = 2 .* v_fault_cpu .+ params.Vpl
+    Vf_new = copy(Vf_old)
+
+    if state.iteration == 0
+        v_fault_cpu0 = Array(state.v[fault_id])
+        Vf_old .= 2 .* v_fault_cpu0 .+ params.Vpl
+        Vf_new .= copy(Vf_old)
+    end
+
+    fltni_gpu = solver.fltni_gpu
+
+    # Pre-download small boundary arrays to CPU (used in every pass)
+    u_prev_fault_cpu = Array(state.u_prev[fault_id])
+    u_prev_creep_cpu = Array(state.u_prev[creep_id])
+    v_fault_cpu_init = Array(state.v[fault_id])
+    v_creep_cpu_init = Array(state.v[creep_id])
+
+    for pass in 1:2
+        # Step 1: Prescribed displacement on boundaries.
+        # Download v at boundary nodes, compute prescribed u, upload back.
+        fill!(state.f, zero(T))
+        v_fault_now = Array(state.v[fault_id])
+        v_creep_now = Array(state.v[creep_id])
+
+        # Compute prescribed displacements on CPU, scatter-upload to GPU
+        f_fault_cpu = u_prev_fault_cpu .+ v_fault_now .* dt
+        f_creep_cpu = u_prev_creep_cpu .+ v_creep_now .* dt
+        state.f[fault_id] .= CuArray(f_fault_cpu)
+        state.f[creep_id] .= CuArray(f_creep_cpu)
+
+        # Step 2: Compute K*f (boundary displacement contribution to RHS)
+        apply_stiffness!(state.a, state.f, weights_gpu, H_gpu, Ht_gpu, dof_id_gpu, mesh.n_elements)
+        rhs_full = state.a   # K * f_prescribed
+        rhs_gpu = Array(rhs_full[fltni_gpu])  # reduced RHS on CPU for AMGX upload
+
+        # Warm-start from previous displacement
+        x0_gpu = Array(state.u_prev[fltni_gpu])
+
+        # Step 2b: AMGX solve: K*u = -rhs (PCG+AMG fully on GPU)
+        AMGX.upload!(solver.b_buf, -rhs_gpu)
+        AMGX.upload!(solver.x_buf, x0_gpu)
+        AMGX.solve!(solver.x_buf, solver.amgx_solver, solver.b_buf)
+
+        # Extract solution back to GPU state vector
+        u_sol_cpu = AMGX.download(solver.x_buf)
+        if any(isnan.(u_sol_cpu)) || any(isinf.(u_sol_cpu))
+            @error "Non-finite values in AMGX solution" pass iteration=state.iteration
+            error("AMGX solver produced non-finite values")
+        end
+        state.u[fltni_gpu] .= CuArray(u_sol_cpu)
+
+        # Enforce prescribed displacements on boundaries (scatter-upload)
+        state.u[fault_id] .= CuArray(f_fault_cpu)
+        state.u[creep_id] .= CuArray(f_creep_cpu)
+
+        # Step 3: Compute fault traction
+        fill!(state.a, zero(T))
+        apply_stiffness!(state.a, state.u, weights_gpu, H_gpu, Ht_gpu, dof_id_gpu, mesh.n_elements)
+        state.a[creep_id] .= 0
+
+        # Extract fault stress (download fault-size arrays to CPU for NR)
+        a_fault_cpu = Array(state.a[fault_id])
+        τf_cpu = -a_fault_cpu ./ fault_matrix
+
+        if any(isnan.(τf_cpu)) || any(isinf.(τf_cpu))
+            @error "Non-finite fault stress" pass iteration=state.iteration
+            error("Non-finite fault stress computed")
+        end
+
+        # Steps 4 & 5: Rate-state evolution (CPU loop over ~1-2k fault nodes)
+        ψ_cpu = Array(state.ψ)
+
+        for i in eachindex(fault_id)
+            ψ_cpu[i] = state_time_evolution(ψ_cpu[i], Vf_new[i], dt,
+                                            ics.friction.Lc[i], params.Vo)
+            Vf_new[i] = fault_slip_rate(ψ_cpu[i], τf_cpu[i],
+                                        ics.τo[i], ics.σo[i],
+                                        ics.friction.a[i], ics.friction.b[i],
+                                        params.Vo, params.fo)
+
+            if !isfinite(Vf_new[i]) && state.iteration == 1
+                @error "Non-finite slip rate at fault node" i pass
+                error("Non-finite slip rate computed")
+            end
+        end
+
+        # Upload updated ψ, τf back to GPU
+        copyto!(state.ψ, CuArray(ψ_cpu))
+        copyto!(state.τf, CuArray(τf_cpu))
+
+        # Average slip rates
+        Vf_new .= 0.5 .* (Vf_old .+ Vf_new)
+
+        # Update fault/creep velocity (scatter-upload)
+        v_fault_new_cpu = 0.5 .* (Vf_new .- params.Vpl)
+        state.v[fault_id] .= CuArray(v_fault_new_cpu)
+        state.v[creep_id] .= zero(T)
+    end  # Two-pass iteration
+
+    # Update global velocity from displacement change
+    state.v .= (state.u .- state.u_prev) ./ dt
+    clamp!(state.v, -physics.vs, physics.vs)
+
+    # Re-enforce boundary velocities (scatter-upload)
+    v_fault_final = 0.5 .* (Vf_new .- params.Vpl)
+    state.v[fault_id] .= CuArray(v_fault_final)
+    state.v[creep_id] .= zero(T)
+
+    # Blowup detection (download max for check)
+    v_max = maximum(abs.(Array(state.v)))
+    u_max = maximum(abs.(Array(state.u)))
+    if v_max > 1e10 || u_max > 1e10
+        @error "GPU QS blowup detected" v_max u_max dt iteration=state.iteration
+        error("GPU quasistatic solver produced non-physical values")
+    end
+
+    fill!(state.a, zero(T))
+    state.u[creep_id] .= zero(T)
+    state.v[creep_id] .= zero(T)
+
+    copyto!(state.Vf, CuArray(Vf_new))
+
+    return nothing
+end

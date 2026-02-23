@@ -67,7 +67,7 @@ r₀ = (μ * Lc) / (a * σ_n) * (1 - (b-a)/a)
 ```
 where the threshold `ξth` ensures stable resolution of the nucleation process.
 """
-function compute_timestep(fault_V::Vector{T},
+function compute_timestep(fault_V::AbstractVector{T},
                          fault_coords::AbstractMatrix{T},
                          friction,  # RateStateFriction type
                          timestepper::AdaptiveTimestepper{T},
@@ -77,11 +77,14 @@ function compute_timestep(fault_V::Vector{T},
                          ξmax::T=T(0.5),
                          dt_incf::T=T(1.2)) where T<:AbstractFloat
 
+    # Download to CPU if needed (fault array is small: ~1-2k nodes)
+    fault_V_cpu = fault_V isa Vector ? fault_V : Array(fault_V)
+
     if solver_mode == :quasistatic
         dt_new = timestepper.dt_max  # Start with maximum allowed
 
         # Check each fault node
-        for i in eachindex(fault_V)
+        for i in eachindex(fault_V_cpu)
             # Compute nucleation length threshold parameter
             # expr1 = -(a - b) / a
             expr1 = -(friction.a[i] - friction.b[i]) / friction.a[i]
@@ -109,8 +112,8 @@ function compute_timestep(fault_V::Vector{T},
             end
 
             # Restrict timestep based on slip rate
-            if abs(fault_V[i]) * timestepper.dt_max > ξLf
-                dt_cell = ξLf / abs(fault_V[i])
+            if abs(fault_V_cpu[i]) * timestepper.dt_max > ξLf
+                dt_cell = ξLf / abs(fault_V_cpu[i])
                 if dt_cell < dt_new
                     dt_new = dt_cell
                 end

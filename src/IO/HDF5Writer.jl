@@ -331,35 +331,17 @@ end
 
 Compute cumulative slip at a single fault node (antiplane).
 """
-function compute_fault_slip(state::SimulationState, fault_id, fault_idx::Int, time, Vpl)
-    return state.cum_slip[fault_idx]
-end
-
-"""
-    compute_fault_slip(state, fault_id, fault_idx, time, Vpl)
-
-Compute cumulative slip at a single fault node (plane-strain).
-"""
-function compute_fault_slip(state::SimulationStatePlaneStrain, fault_id, fault_idx::Int, time, Vpl)
-    return state.cum_slip[fault_idx]
+function compute_fault_slip(state::AbstractSimulationState, fault_id, fault_idx::Int, time, Vpl)
+    return Array(state.cum_slip)[fault_idx]
 end
 
 """
     compute_fault_slip_profile(state, fault_id, time, Vpl)
 
-Compute cumulative slip at all fault nodes (antiplane).
+Compute cumulative slip at all fault nodes.
 """
-function compute_fault_slip_profile(state::SimulationState, fault_id, time, Vpl)
-    return copy(state.cum_slip)
-end
-
-"""
-    compute_fault_slip_profile(state, fault_id, time, Vpl)
-
-Compute cumulative slip at all fault nodes (plane-strain).
-"""
-function compute_fault_slip_profile(state::SimulationStatePlaneStrain, fault_id, time, Vpl)
-    return copy(state.cum_slip)
+function compute_fault_slip_profile(state::AbstractSimulationState, fault_id, time, Vpl)
+    return Array(state.cum_slip)
 end
 
 
@@ -385,10 +367,16 @@ function write_timestep!(io::HDF5OutputManager, state, mesh, ics, params)
 
     fault_id = mesh.boundaries.fault.node_ids
 
+    # Download GPU fault arrays to CPU for HDF5 writes (small arrays, low cost)
+    Vf_cpu  = Array(state.Vf)
+    τf_cpu  = Array(state.τf)
+    ψ_cpu   = Array(state.ψ)
+    cs_cpu  = Array(state.cum_slip)
+
     # === Global time series ===
     extend_and_write!(file["timeseries/time"], idx, state.time)
 
-    Vf_max = maximum(abs.(state.Vf))
+    Vf_max = maximum(abs.(Vf_cpu))
     extend_and_write!(file["timeseries/max_slip_rate"], idx, Vf_max)
 
     # Save solver mode (0 = quasistatic, 1 = dynamic)
@@ -400,11 +388,11 @@ function write_timestep!(io::HDF5OutputManager, state, mesh, ics, params)
         depth_str = @sprintf("depth_%.1fkm", io.depths[i])
         depth_path = "timeseries/$depth_str"
 
-        # Compute quantities
-        slip = compute_fault_slip(state, fault_id, fault_idx, state.time, params.Vpl)
-        slip_rate = state.Vf[fault_idx]
-        shear_stress = (state.τf[fault_idx] + ics.τo[fault_idx]) / 1e6  # MPa
-        psi = state.ψ[fault_idx]
+        # Compute quantities (using CPU arrays)
+        slip = compute_fault_slip_cpu(cs_cpu, fault_idx, state.time, params.Vpl)
+        slip_rate = Vf_cpu[fault_idx]
+        shear_stress = (τf_cpu[fault_idx] + ics.τo[fault_idx]) / 1e6  # MPa
+        psi = ψ_cpu[fault_idx]
 
         # Write to datasets
         extend_and_write!(file["$depth_path/slip"], idx, slip)
@@ -419,6 +407,11 @@ function write_timestep!(io::HDF5OutputManager, state, mesh, ics, params)
     end
 
     return nothing
+end
+
+# Helper: compute slip from already-downloaded CPU cum_slip array
+function compute_fault_slip_cpu(cum_slip_cpu::Vector, fault_idx::Int, time, Vpl)
+    return cum_slip_cpu[fault_idx]
 end
 
 
@@ -471,11 +464,11 @@ function write_snapshot!(io::HDF5OutputManager, state, mesh, ics, params, config
     fault_id = mesh.boundaries.fault.node_ids
     n_fault = length(fault_id)
 
-    # Compute full fault quantities
+    # Compute full fault quantities (download GPU arrays to CPU for HDF5)
     slip = compute_fault_slip_profile(state, fault_id, state.time, params.Vpl)
-    slip_rate = state.Vf
-    shear_stress = (state.τf .+ ics.τo) ./ 1e6  # MPa
-    state_var = state.ψ
+    slip_rate = Array(state.Vf)
+    shear_stress = (Array(state.τf) .+ ics.τo) ./ 1e6  # MPa
+    state_var = Array(state.ψ)
 
     # Write snapshot time
     extend_and_write!(file["snapshots/times"], snap_idx, state.time)

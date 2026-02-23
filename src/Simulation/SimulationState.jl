@@ -41,23 +41,23 @@ The state can be serialized for checkpointing via JLD2.
 """
 abstract type AbstractSimulationState{T<:AbstractFloat} end
 
-mutable struct SimulationState{T<:AbstractFloat} <: AbstractSimulationState{T}
+mutable struct SimulationState{T<:AbstractFloat, V<:AbstractVector{T}} <: AbstractSimulationState{T}
     # Global fields
-    u::Vector{T}
-    v::Vector{T}
-    a::Vector{T}
+    u::V
+    v::V
+    a::V
 
     # Fault-specific fields
-    τf::Vector{T}
-    ψ::Vector{T}
-    Vf::Vector{T}
-    cum_slip::Vector{T}
+    τf::V
+    ψ::V
+    Vf::V
+    cum_slip::V
 
     # Workspace arrays
-    u_prev::Vector{T}
-    v_prev::Vector{T}
-    f::Vector{T}
-    fault_vfree::Vector{T}
+    u_prev::V
+    v_prev::V
+    f::V
+    fault_vfree::V
 
     # Time tracking
     time::T
@@ -96,14 +96,15 @@ state = SimulationState(mesh, ics, params, v_init=5.0e-4)
 ```
 """
 function SimulationState(mesh::UnstructuredSEMesh{T}, ics, params;
-                        v_init::Real=T(5.0e-4)) where T<:AbstractFloat
+                        v_init::Real=T(5.0e-4),
+                        use_gpu::Bool=false) where T<:AbstractFloat
 
     ndof = mesh.ndof
     nfault = length(mesh.boundaries.fault.node_ids)
     fault_id = mesh.boundaries.fault.node_ids
     creep_id = mesh.boundaries.creep.node_ids
 
-    # Allocate global fields
+    # Allocate global fields (CPU first)
     u = zeros(T, ndof)
     v = zeros(T, ndof)
     a = zeros(T, ndof)
@@ -150,7 +151,15 @@ function SimulationState(mesh::UnstructuredSEMesh{T}, ics, params;
     iteration = 0
     solver_mode = :quasistatic
 
-    return SimulationState{T}(
+    if use_gpu
+        # Upload state arrays to GPU
+        u = CuArray(u); v = CuArray(v); a = CuArray(a)
+        τf = CuArray(τf); ψ = CuArray(ψ); Vf = CuArray(Vf); cum_slip = CuArray(cum_slip)
+        u_prev = CuArray(u_prev); v_prev = CuArray(v_prev)
+        f = CuArray(f); fault_vfree = CuArray(fault_vfree)
+    end
+
+    return SimulationState{T, typeof(u)}(
         u, v, a,
         τf, ψ, Vf, cum_slip,
         u_prev, v_prev, f, fault_vfree,
@@ -175,19 +184,19 @@ Compute current total fault slip velocity from state.
 # Notes
 For single-sided fault: `V_total = 2*v + Vpl`
 """
-function current_fault_slip_velocity(state::SimulationState, fault_id::Vector{Int}, Vpl::Real)
-    return 2 .* state.v[fault_id] .+ Vpl
+function current_fault_slip_velocity(state::AbstractSimulationState, fault_id::Vector{Int}, Vpl::Real)
+    return 2 .* Array(state.v[fault_id]) .+ Vpl
 end
 
 
 """
-    maximum_fault_slip_rate(state::SimulationState)
+    maximum_fault_slip_rate(state::AbstractSimulationState)
 
 Get maximum fault slip rate from current state.
 
 # Returns
 - Maximum slip rate [m/s]
 """
-function maximum_fault_slip_rate(state::SimulationState)
-    return maximum(abs.(state.Vf))
+function maximum_fault_slip_rate(state::AbstractSimulationState)
+    return Float64(maximum(abs.(state.Vf)))
 end

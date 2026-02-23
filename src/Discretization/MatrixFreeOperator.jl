@@ -435,3 +435,49 @@ function stiffness_assembly_plane_strain(K_el::Array{T,3}, dof_id::Array{Int,3},
 
     return sparse(II, JJ, VV, 2 * ndof, 2 * ndof, +)
 end
+
+
+# ============================================================================
+# GPU dispatch: CuArray overloads
+# These route to the KA.jl GPU kernels in GPUKernels.jl when arrays are CuArrays.
+# ============================================================================
+
+"""
+    apply_stiffness!(y::CuVector, x::CuVector, weights::MetricWeightsAntiplane, H_cu, Ht_cu, dof_id_cu, n_elements)
+
+GPU dispatch: apply antiplane stiffness via KA.jl tensor-product kernel.
+
+Requires H, Ht, and dof_id to already be CuArrays/CuMatrix for GPU execution.
+"""
+function apply_stiffness!(
+    y::CuVector{T},
+    x::CuVector{T},
+    weights::MetricWeightsAntiplane{T},
+    H::CuMatrix{T},
+    Ht::CuMatrix{T},
+    dof_id::CuArray{<:Integer,3},
+    n_elements::Int
+) where T
+    launch_stiffness_antiplane!(y, x, weights.g, H, Ht, dof_id, n_elements, weights.nnodes)
+    return y
+end
+
+
+"""
+    apply_stiffness_plane_strain!(y::CuVector, x::CuVector, weights::MetricWeightsPlaneStrain, H_cu, Ht_cu, dof_id_cu, n_elements, ndof)
+
+GPU dispatch: apply plane-strain stiffness via KA.jl tensor-product kernel.
+"""
+function apply_stiffness_plane_strain!(
+    y::CuVector{T},
+    x::CuVector{T},
+    weights::MetricWeightsPlaneStrain{T},
+    H::CuMatrix{T},
+    Ht::CuMatrix{T},
+    dof_id::CuArray{<:Integer,3},
+    n_elements::Int,
+    ndof::Int
+) where T
+    launch_stiffness_plane_strain!(y, x, weights.g, H, Ht, dof_id, n_elements, weights.nnodes, ndof)
+    return y
+end

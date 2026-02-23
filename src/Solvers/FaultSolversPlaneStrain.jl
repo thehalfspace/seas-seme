@@ -78,9 +78,9 @@ FaultVFree_tangential = 2*v_tang + dt*a_tang/M
 - `vfree_tang::Vector{T}`: Tangential free velocity at fault nodes
 """
 function compute_stick_traction_plane_strain(
-    v::Vector{T},
-    a::Vector{T},
-    M_global::Vector{T},
+    v::AbstractVector{T},
+    a::AbstractVector{T},
+    M_global::AbstractVector{T},
     fault_id::Vector{Int},
     tangent::Matrix{T},
     ndof::Int,
@@ -89,15 +89,20 @@ function compute_stick_traction_plane_strain(
     nfault = length(fault_id)
     vfree_tang = zeros(T, nfault)
 
+    # Download GPU arrays to CPU for scalar fault-node loop (fault arrays are small)
+    v_cpu = (v isa Vector) ? v : Array(v)
+    a_cpu = (a isa Vector) ? a : Array(a)
+    M_cpu = (M_global isa Vector) ? M_global : Array(M_global)
+
     for i in 1:nfault
         nid = fault_id[i]
         tx, ty = tangent[1, i], tangent[2, i]
 
         # Velocity tangential component
-        v_tang = v[nid] * tx + v[ndof + nid] * ty
+        v_tang = v_cpu[nid] * tx + v_cpu[ndof + nid] * ty
 
         # Acceleration tangential component (force / mass)
-        a_tang = (a[nid] * tx) / M_global[nid] + (a[ndof + nid] * ty) / M_global[ndof + nid]
+        a_tang = (a_cpu[nid] * tx) / M_cpu[nid] + (a_cpu[ndof + nid] * ty) / M_cpu[ndof + nid]
 
         vfree_tang[i] = 2 * v_tang + dt * a_tang
     end
@@ -125,18 +130,33 @@ The traction is applied in the tangent direction:
 - `ndof::Int`: Number of spatial DOFs
 """
 function apply_fault_traction_plane_strain!(
-    a::Vector{T},
+    a::AbstractVector{T},
     fault_id::Vector{Int},
     fault_mat::Vector{T},
-    τf::Vector{T},
+    τf::AbstractVector{T},
     tangent::Matrix{T},
     ndof::Int
 ) where {T<:AbstractFloat}
-    for i in eachindex(fault_id)
-        nid = fault_id[i]
-        traction_force = fault_mat[i] * τf[i]
-        a[nid]        -= traction_force * tangent[1, i]
-        a[ndof + nid] -= traction_force * tangent[2, i]
+    # If a is on GPU, download fault-only rows, modify, scatter back
+    if !(a isa Vector)
+        a_x_cpu = Array(a[fault_id])
+        a_y_cpu = Array(a[ndof .+ fault_id])
+        τf_cpu  = (τf isa Vector) ? τf : Array(τf)
+        for i in eachindex(fault_id)
+            traction_force = fault_mat[i] * τf_cpu[i]
+            a_x_cpu[i] -= traction_force * tangent[1, i]
+            a_y_cpu[i] -= traction_force * tangent[2, i]
+        end
+        a[fault_id]        .= CuArray(a_x_cpu)
+        a[ndof .+ fault_id] .= CuArray(a_y_cpu)
+    else
+        τf_cpu = (τf isa Vector) ? τf : Array(τf)
+        for i in eachindex(fault_id)
+            nid = fault_id[i]
+            traction_force = fault_mat[i] * τf_cpu[i]
+            a[nid]        -= traction_force * tangent[1, i]
+            a[ndof + nid] -= traction_force * tangent[2, i]
+        end
     end
 end
 
@@ -155,7 +175,7 @@ For diagonal mass with identical M_x == M_y, this simplifies to M/fault_mat/dt.
 - `fault_z::Vector{T}`: Fault impedance at each node
 """
 function compute_fault_impedance_plane_strain(
-    M_global::Vector{T},
+    M_global::AbstractVector{T},
     fault_id::Vector{Int},
     fault_mat::Vector{T},
     ndof::Int,
@@ -164,10 +184,10 @@ function compute_fault_impedance_plane_strain(
     nfault = length(fault_id)
     fault_z = zeros(T, nfault)
 
+    M_fault = Array(M_global[fault_id])  # download only fault nodes (CPU or GPU)
     for i in 1:nfault
-        nid = fault_id[i]
         # M_x == M_y for our formulation, use M_x
-        fault_z[i] = M_global[nid] / (fault_mat[i] * dt)
+        fault_z[i] = M_fault[i] / (fault_mat[i] * dt)
     end
 
     return fault_z
@@ -183,7 +203,7 @@ v_x[fault] = 0.5*(Vf - Vpl) * tangent_x
 v_y[fault] = 0.5*(Vf - Vpl) * tangent_y
 """
 function set_fault_velocity_plane_strain!(
-    v::Vector{T},
+    v::AbstractVector{T},
     fault_id::Vector{Int},
     Vf::Vector{T},
     Vpl::T,
@@ -207,7 +227,7 @@ Extract total fault slip rate (tangential) from velocity field.
 Returns Vf = 2*v_tangential + Vpl for each fault node.
 """
 function get_fault_tangential_velocity(
-    v::Vector{T},
+    v::AbstractVector{T},
     fault_id::Vector{Int},
     tangent::Matrix{T},
     ndof::Int,
@@ -216,9 +236,12 @@ function get_fault_tangential_velocity(
     nfault = length(fault_id)
     Vf = zeros(T, nfault)
 
+    # Download fault nodes only (efficient even for GPU)
+    v_cpu = (v isa Vector) ? v : Array(v)
+
     for i in 1:nfault
         nid = fault_id[i]
-        v_tang = v[nid] * tangent[1, i] + v[ndof + nid] * tangent[2, i]
+        v_tang = v_cpu[nid] * tangent[1, i] + v_cpu[ndof + nid] * tangent[2, i]
         Vf[i] = 2 * v_tang + Vpl
     end
 

@@ -115,7 +115,7 @@ log_event(:earthquake, state, Dict(
 ))
 ```
 """
-function log_event(event_type::Symbol, state::SimulationState, details::Dict=Dict())
+function log_event(event_type::Symbol, state::AbstractSimulationState, details::Dict=Dict())
     timestamp = now()
     iter = state.iteration
     time = state.time

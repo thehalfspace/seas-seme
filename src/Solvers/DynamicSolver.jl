@@ -80,10 +80,10 @@ Perform one dynamic time step using leap-frog integration.
 - `state.fault_vfree`: Stick traction workspace
 """
 function dynamic_step!(state, solver::DynamicSolver{T}, mesh, physics, ics,
-                      params, M_global::Vector{T},
+                      params, M_global::AbstractVector{T},
                       weights::MetricWeightsAntiplane{T},
-                      H::Matrix{T}, Ht::Matrix{T},
-                      dof_id::Array{Int,3}) where T<:AbstractFloat
+                      H::AbstractMatrix{T}, Ht::AbstractMatrix{T},
+                      dof_id::AbstractArray{<:Integer,3}) where T<:AbstractFloat
 
     dt = solver.dt_min
 
@@ -95,7 +95,8 @@ function dynamic_step!(state, solver::DynamicSolver{T}, mesh, physics, ics,
 
     # Compute fault impedance: Z = M / (fault_matrix * dt)
     # See Kaneko et al. (2008) for derivation
-    fault_z = M_global[fault_id] ./ (fault_matrix .* dt)
+    # Always keep fault_z on CPU (small array, needed for per-node NR loop)
+    fault_z = Array(M_global[fault_id]) ./ (fault_matrix .* dt)
 
     absorb_matrix = mesh.boundaries.absorbing.matrix
 
@@ -120,8 +121,18 @@ function dynamic_step!(state, solver::DynamicSolver{T}, mesh, physics, ics,
     state.a[creep_id] .= 0
 
     # Apply absorbing boundary conditions (Lysmer dampers)
-    @inbounds @simd for i in eachindex(absorbing_id)
-        state.a[absorbing_id[i]] -= absorb_matrix[i] * state.v[absorbing_id[i]]
+    # For GPU: download small absorbing-node arrays, modify, scatter back
+    if !(state.a isa Vector)
+        a_abs_cpu = Array(state.a[absorbing_id])
+        v_abs_cpu = Array(state.v[absorbing_id])
+        for i in eachindex(absorbing_id)
+            a_abs_cpu[i] -= absorb_matrix[i] * v_abs_cpu[i]
+        end
+        state.a[absorbing_id] .= CuArray(a_abs_cpu)
+    else
+        @inbounds @simd for i in eachindex(absorbing_id)
+            state.a[absorbing_id[i]] -= absorb_matrix[i] * state.v[absorbing_id[i]]
+        end
     end
 
     #--------------------------------------------------
@@ -130,96 +141,114 @@ function dynamic_step!(state, solver::DynamicSolver{T}, mesh, physics, ics,
 
     # Step 4: Compute stick traction (free velocity if no friction)
     # FaultVFree = 2*v[n+1/2] + dt*a_internal/M
-    @inbounds for i in eachindex(fault_id)
-        fid = fault_id[i]
-        state.fault_vfree[i] = 2 * state.v[fid] + dt * state.a[fid] / M_global[fid]
+    # Download fault nodes from GPU for scalar computation
+    v_fault_cpu  = Array(state.v[fault_id])
+    a_fault_cpu  = Array(state.a[fault_id])
+    M_fault_cpu  = Array(M_global[fault_id])
+    fault_vfree_cpu = similar(M_fault_cpu)
+    for i in eachindex(fault_id)
+        fault_vfree_cpu[i] = 2 * v_fault_cpu[i] + dt * a_fault_cpu[i] / M_fault_cpu[i]
     end
 
     # Fault slip rate from previous timestep (for state update)
-    Vf_prev = 2 .* state.v_prev[fault_id] .+ params.Vpl
+    v_prev_fault_cpu = Array(state.v_prev[fault_id])
+    Vf_prev = 2 .* v_prev_fault_cpu .+ params.Vpl
+
+    # Download fault state arrays for NR loop
+    ψ_cpu  = Array(state.ψ)
+    Vf_cpu = Array(state.Vf)
+    τf_cpu = Array(state.τf)
 
     # Workspace for two-iteration NR search
-    Vf_first_iter = similar(state.Vf)
+    Vf_first_iter = similar(Vf_cpu)
 
-    # Step 5-7: Solve nonlinear fault boundary equations
+    # Step 5-7: Solve nonlinear fault boundary equations (CPU loop)
     for i in eachindex(fault_id)
         # Save ψ before update so we can restore on NR failure
-        ψ_saved = state.ψ[i]
+        ψ_saved = ψ_cpu[i]
 
         # Update state variable using slip rate from previous step
-        state.ψ[i] = state_time_evolution(state.ψ[i], Vf_prev[i], dt,
-                                         ics.friction.Lc[i], params.Vo)
+        ψ_cpu[i] = state_time_evolution(ψ_cpu[i], Vf_prev[i], dt,
+                                        ics.friction.Lc[i], params.Vo)
 
         # Store slip rate for second iteration
         Vf_first_iter[i] = Vf_prev[i]
 
         # CRITICAL FIX: Convert perturbation stress → total stress for nr_search
-        # state.τf[i] stores τ_perturbation = τ_total - τ_init from previous timestep
-        # But nr_search expects τ_total as initial guess
-        τ_total_guess = state.τf[i] + ics.τo[i]
+        τ_total_guess = τf_cpu[i] + ics.τo[i]
 
         # Newton-Raphson search (1st iteration)
-        state.Vf[i], state.τf[i] = nr_search(
-            τ_total_guess,        # FIXED: Use total stress as initial guess
+        Vf_cpu[i], τf_cpu[i] = nr_search(
+            τ_total_guess,
             params.fo,
             params.Vo,
             ics.friction.a[i],
             ics.friction.b[i],
             ics.σo[i],
             ics.τo[i],
-            state.ψ[i],
+            ψ_cpu[i],
             fault_z[i],
-            state.fault_vfree[i]
+            fault_vfree_cpu[i]
         )
 
         # Check for NaN (indicates NR failure) — restore ψ and continue
-        if isnan(state.Vf[i]) || isnan(state.τf[i])
-            state.ψ[i] = ψ_saved
-            state.Vf[i] = Vf_prev[i]
-            state.τf[i] = τ_total_guess - ics.τo[i]
+        if isnan(Vf_cpu[i]) || isnan(τf_cpu[i])
+            ψ_cpu[i] = ψ_saved
+            Vf_cpu[i] = Vf_prev[i]
+            τf_cpu[i] = τ_total_guess - ics.τo[i]
             @warn "NR search produced NaN, restoring previous state" location=i iter=state.iteration
             continue
         end
 
         # 2nd iteration: Update state with average slip rate for accuracy
-        # (See Kaneko et al. 2008 - single iteration is less accurate)
-        ψ_after_first = state.ψ[i]
-        avg_slip_rate = 0.5 * (state.Vf[i] + Vf_first_iter[i])
-        state.ψ[i] = state_time_evolution(state.ψ[i], avg_slip_rate, dt,
-                                         ics.friction.Lc[i], params.Vo)
+        ψ_after_first = ψ_cpu[i]
+        avg_slip_rate = 0.5 * (Vf_cpu[i] + Vf_first_iter[i])
+        ψ_cpu[i] = state_time_evolution(ψ_cpu[i], avg_slip_rate, dt,
+                                        ics.friction.Lc[i], params.Vo)
 
-        # Newton-Raphson search (2nd iteration) — capture locally to guard NaN
-        # state.τf[i] already contains total stress from 1st iteration, no conversion needed
         Vf_2nd, τf_2nd = nr_search(
-            state.τf[i],          # Already total stress from 1st iteration
+            τf_cpu[i],
             params.fo,
             params.Vo,
             ics.friction.a[i],
             ics.friction.b[i],
             ics.σo[i],
             ics.τo[i],
-            state.ψ[i],
+            ψ_cpu[i],
             fault_z[i],
-            state.fault_vfree[i]
+            fault_vfree_cpu[i]
         )
 
         if isnan(Vf_2nd) || isnan(τf_2nd)
-            # 2nd NR failed — keep 1st iteration results and restore ψ
-            state.ψ[i] = ψ_after_first
+            ψ_cpu[i] = ψ_after_first
             @warn "NR 2nd iteration produced NaN, keeping 1st iteration result" location=i
         else
-            state.Vf[i] = Vf_2nd
-            state.τf[i] = τf_2nd
+            Vf_cpu[i] = Vf_2nd
+            τf_cpu[i] = τf_2nd
         end
     end
 
+    # Upload NR results back to state (works for both CPU and GPU)
+    copyto!(state.ψ, _as_storage(state.ψ, ψ_cpu))
+    copyto!(state.Vf, _as_storage(state.Vf, Vf_cpu))
+    copyto!(state.fault_vfree, _as_storage(state.fault_vfree, fault_vfree_cpu))
+
     # Convert fault stress to perturbation from initial stress
-    # (NR search works with total stress = τ_init + τ_perturbation)
-    state.τf .= state.τf .- ics.τo
+    τf_pert_cpu = τf_cpu .- ics.τo
+    copyto!(state.τf, _as_storage(state.τf, τf_pert_cpu))
 
     # Step 8: Apply fault traction to force vector
-    @inbounds @simd for i in eachindex(fault_id)
-        state.a[fault_id[i]] -= fault_matrix[i] * state.τf[i]
+    # Download a[fault_id], modify, scatter back (for GPU path)
+    if !(state.a isa Vector)
+        a_flt_cpu = Array(state.a[fault_id])
+        for i in eachindex(fault_id)
+            a_flt_cpu[i] -= fault_matrix[i] * τf_pert_cpu[i]
+        end
+        state.a[fault_id] .= CuArray(a_flt_cpu)
+    else
+        @inbounds @simd for i in eachindex(fault_id)
+            state.a[fault_id[i]] -= fault_matrix[i] * τf_pert_cpu[i]
+        end
     end
 
     #--------------------------------------------------

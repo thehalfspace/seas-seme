@@ -45,26 +45,26 @@ Mutable container for plane-strain simulation state.
 - `ndof::Int`: Number of spatial DOFs
 - `nfault::Int`: Number of fault nodes
 """
-mutable struct SimulationStatePlaneStrain{T<:AbstractFloat} <: AbstractSimulationState{T}
+mutable struct SimulationStatePlaneStrain{T<:AbstractFloat, V<:AbstractVector{T}} <: AbstractSimulationState{T}
     # Global fields (length 2*ndof)
-    u::Vector{T}
-    v::Vector{T}
-    a::Vector{T}
+    u::V
+    v::V
+    a::V
 
     # Fault-specific fields (length nfault)
-    τf::Vector{T}
-    ψ::Vector{T}
-    Vf::Vector{T}
-    cum_slip::Vector{T}
-    σn_perturbation::Vector{T}  # Normal stress perturbation from elasticity
+    τf::V
+    ψ::V
+    Vf::V
+    cum_slip::V
+    σn_perturbation::V  # Normal stress perturbation from elasticity
 
     # Workspace arrays
-    u_prev::Vector{T}
-    v_prev::Vector{T}
-    f::Vector{T}
-    fault_vfree::Vector{T}
+    u_prev::V
+    v_prev::V
+    f::V
+    fault_vfree::V
 
-    # Fault geometry
+    # Fault geometry (always CPU - small, read-only after init)
     fault_tangent::Matrix{T}    # [2, nfault]
     fault_normal::Matrix{T}     # [2, nfault]
 
@@ -97,7 +97,8 @@ For a vertical fault (dip=90°), tangent = (0, -1), so the initial velocity
 is entirely in the -y direction, consistent with downward-sliding motion.
 """
 function SimulationStatePlaneStrain(mesh::UnstructuredSEMesh{T}, ics, params;
-                                    v_init::Real=T(5.0e-4)) where T<:AbstractFloat
+                                    v_init::Real=T(5.0e-4),
+                                    use_gpu::Bool=false) where T<:AbstractFloat
     ndof = mesh.ndof
     nfault = length(mesh.boundaries.fault.node_ids)
     fault_id = mesh.boundaries.fault.node_ids
@@ -181,7 +182,16 @@ function SimulationStatePlaneStrain(mesh::UnstructuredSEMesh{T}, ics, params;
     iteration = 0
     solver_mode = :quasistatic
 
-    return SimulationStatePlaneStrain{T}(
+    if use_gpu
+        # Upload state arrays to GPU (fault_tangent/normal stay CPU - small, read-only)
+        u = CuArray(u); v = CuArray(v); a = CuArray(a)
+        τf = CuArray(τf); ψ = CuArray(ψ); Vf = CuArray(Vf)
+        cum_slip = CuArray(cum_slip); σn_perturbation = CuArray(σn_perturbation)
+        u_prev = CuArray(u_prev); v_prev = CuArray(v_prev)
+        f = CuArray(f); fault_vfree = CuArray(fault_vfree)
+    end
+
+    return SimulationStatePlaneStrain{T, typeof(u)}(
         u, v, a,
         τf, ψ, Vf, cum_slip, σn_perturbation,
         u_prev, v_prev, f, fault_vfree,
@@ -197,6 +207,6 @@ end
 
 Get maximum fault slip rate from current state.
 """
-function maximum_fault_slip_rate(state::SimulationStatePlaneStrain)
-    return maximum(abs.(state.Vf))
+function maximum_fault_slip_rate(state::SimulationStatePlaneStrain{T,V}) where {T,V}
+    return Float64(maximum(abs.(state.Vf)))
 end

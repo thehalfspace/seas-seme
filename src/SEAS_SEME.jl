@@ -35,6 +35,12 @@ using DelimitedFiles
 using HDF5
 using JLD2
 
+# GPU dependencies (loaded conditionally; CUDA.jl will be a no-op if no GPU present)
+using CUDA
+using CUDA.CUSPARSE
+using KernelAbstractions
+using AMGX
+
 # Include submodules
 include("NumericalConstants.jl")
 
@@ -58,6 +64,7 @@ include("Discretization/StiffnessMatrix.jl")
 include("Discretization/StiffnessMatrixPlaneStrain.jl")
 include("Discretization/MassMatrixPlaneStrain.jl")
 include("Discretization/MetricWeights.jl")
+include("GPU/GPUKernels.jl")
 include("Discretization/MatrixFreeOperator.jl")
 include("Discretization/Discretization.jl")
 
@@ -89,5 +96,28 @@ export load_config, validate_config
 export build_simulation, run!
 export load_checkpoint, save_checkpoint
 export AbstractSimulationState, SimulationState, SimulationStatePlaneStrain
+export QuasistaticSolverGPU
+
+
+# ============================================================================
+# AMGX lifecycle: initialize once at module load, finalize at exit
+# ============================================================================
+function __init__()
+    if CUDA.functional()
+        try
+            AMGX.initialize()
+            AMGX.initialize_plugins()
+            atexit(() -> begin
+                try
+                    AMGX.finalize_plugins()
+                    AMGX.finalize()
+                catch
+                end
+            end)
+        catch e
+            @warn "AMGX initialization failed; GPU QS solver unavailable" exception=e
+        end
+    end
+end
 
 end # module SEAS_SEME
