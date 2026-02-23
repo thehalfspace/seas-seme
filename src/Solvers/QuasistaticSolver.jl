@@ -36,14 +36,14 @@ end
 
 
 """
-    build_quasistatic_solver(K_el, dof_id, mesh, fltni;
-                            tolerance=1e-6, max_iterations=100,
-                            amg_max_levels=10, verbose=true)
+    build_quasistatic_solver(weights, H, Ht, dof_id, mesh, fltni; ...)
 
 Construct quasi-static solver with AMG preconditioner.
 
 # Arguments
-- `K_el`: Elemental stiffness matrices [nnodes², nnodes², n_elements]
+- `weights::MetricWeightsAntiplane{T}`: Compact metric weight arrays
+- `H::Matrix{T}`: Derivative matrix
+- `Ht::Matrix{T}`: H' (pre-transposed)
 - `dof_id`: DOF connectivity [nnodes, nnodes, n_elements]
 - `mesh`: UnstructuredSEMesh object
 - `fltni`: Non-fault/creep DOF indices (free DOFs)
@@ -56,24 +56,30 @@ Construct quasi-static solver with AMG preconditioner.
 - `QuasistaticSolver` instance ready for time stepping
 
 # Notes
-- Assembles sparse stiffness matrix once for AMG preconditioner setup
-- Creates matrix-free operator for efficient CG iterations
+- Assembles sparse stiffness matrix once (materializes K_el from weights) for AMG setup
+- Creates matrix-free operator using tensor-product matvec for efficient CG iterations
 - AMG preconditioner significantly accelerates convergence for high-order elements
 """
-function build_quasistatic_solver(K_el::Array{T,3}, dof_id::Array{Int,3},
-                                  mesh, fltni::Vector{Int};
-                                  tolerance::T=T(1e-6),
-                                  max_iterations::Int=100,
-                                  amg_max_levels::Int=10,
-                                  verbose::Bool=true) where T<:AbstractFloat
+function build_quasistatic_solver(
+    weights::MetricWeightsAntiplane{T},
+    H::Matrix{T},
+    Ht::Matrix{T},
+    dof_id::Array{Int,3},
+    mesh,
+    fltni::Vector{Int};
+    tolerance::T=T(1e-6),
+    max_iterations::Int=100,
+    amg_max_levels::Int=10,
+    verbose::Bool=true
+) where T<:AbstractFloat
 
     # Build sparse stiffness matrix for preconditioner
-    # (only need to do this once - amortized cost)
+    # (only need to do this once - amortized cost; materializes K_el from weights)
     if verbose
-        println("Building AMG preconditioner...")
+        println("Building AMG preconditioner (materializing K_el from metric weights)...")
     end
 
-    K_sparse = stiffness_assembly(K_el, dof_id)
+    K_sparse = stiffness_assembly(weights, H, Ht, dof_id)
     K_reduced = K_sparse[fltni, fltni]
 
     # Build AMG preconditioner (Ruge-Stuben)
@@ -85,9 +91,9 @@ function build_quasistatic_solver(K_el::Array{T,3}, dof_id::Array{Int,3},
         println("  Coarsest level size: ", size(ml.levels[end].A, 1))
     end
 
-    # Build matrix-free operator
-    stiffness_op = StiffnessOperator(K_el, dof_id, mesh.n_elements,
-                                    mesh.ndof, fltni)
+    # Build matrix-free operator (tensor-product, zero-allocation per iteration)
+    stiffness_op = StiffnessOperator(weights, H, Ht, dof_id, mesh.n_elements,
+                                     mesh.ndof, fltni)
 
     return QuasistaticSolver(amg_precond, stiffness_op, tolerance,
                             max_iterations, verbose)
@@ -157,21 +163,20 @@ function quasistatic_step!(state, solver::QuasistaticSolver, mesh, physics,
         state.f[creep_id] .= state.u_prev[creep_id] .+ state.v[creep_id] .* dt
 
         # Step 2: Solve K*u = -f for free DOFs (CG with AMG preconditioner)
-        rhs_full = apply_stiffness!(zeros(eltype(state.u), mesh.ndof),
-                                   state.f, solver.stiffness_op.K_el,
-                                   solver.stiffness_op.dof_id,
-                                   mesh.n_elements)
-        rhs = rhs_full[solver.stiffness_op.fltni]
+        # Use operator's y_full workspace to compute K*f (rhs)
+        op = solver.stiffness_op
+        apply_stiffness!(op.y_full, state.f, op.weights, op.H, op.Ht, op.dof_id, mesh.n_elements)
+        rhs = op.y_full[op.fltni]
 
         # Warm-start CG from previous displacement (critical after dynamic→QS transition)
-        x0 = state.u_prev[solver.stiffness_op.fltni]
-        u_sol, history = cg!(x0, solver.stiffness_op, -rhs,
+        x0 = state.u_prev[op.fltni]
+        u_sol, history = cg!(x0, op, -rhs,
                             Pl=solver.preconditioner,
                             reltol=solver.tolerance,
                             maxiter=solver.max_iterations,
                             log=true)
 
-        state.u[solver.stiffness_op.fltni] .= u_sol
+        state.u[op.fltni] .= u_sol
 
         # Check for NaN in solution
         if any(isnan.(u_sol)) || any(isinf.(u_sol))
@@ -185,10 +190,7 @@ function quasistatic_step!(state, solver::QuasistaticSolver, mesh, physics,
 
         # Step 3: Compute fault traction
         fill!(state.a, zero(eltype(state.a)))
-        state.a .= apply_stiffness!(state.a, state.u,
-                                   solver.stiffness_op.K_el,
-                                   solver.stiffness_op.dof_id,
-                                   mesh.n_elements)
+        apply_stiffness!(state.a, state.u, op.weights, op.H, op.Ht, op.dof_id, mesh.n_elements)
 
         # Enforce zero traction on creep boundary
         state.a[creep_id] .= 0

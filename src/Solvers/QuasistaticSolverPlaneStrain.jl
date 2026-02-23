@@ -30,14 +30,14 @@ end
 
 
 """
-    build_quasistatic_solver_plane_strain(K_el, dof_id, mesh, fltni;
-                                          tolerance=1e-6, max_iterations=100,
-                                          amg_max_levels=10, verbose=true)
+    build_quasistatic_solver_plane_strain(weights, H, Ht, dof_id, mesh, fltni; ...)
 
 Construct plane-strain quasi-static solver with AMG preconditioner.
 
 # Arguments
-- `K_el`: Elemental stiffness matrices [2*N, 2*N, n_elements]
+- `weights::MetricWeightsPlaneStrain{T}`: Compact metric weight arrays
+- `H::Matrix{T}`: Derivative matrix
+- `Ht::Matrix{T}`: H' (pre-transposed)
 - `dof_id`: DOF connectivity [nnodes, nnodes, n_elements] (spatial)
 - `mesh`: UnstructuredSEMesh
 - `fltni`: Free DOF indices in the 2*ndof space
@@ -47,8 +47,12 @@ Construct plane-strain quasi-static solver with AMG preconditioner.
 - `QuasistaticSolverPlaneStrain` ready for time stepping
 """
 function build_quasistatic_solver_plane_strain(
-    K_el::Array{T,3}, dof_id::Array{Int,3},
-    mesh, fltni::Vector{Int};
+    weights::MetricWeightsPlaneStrain{T},
+    H::Matrix{T},
+    Ht::Matrix{T},
+    dof_id::Array{Int,3},
+    mesh,
+    fltni::Vector{Int};
     tolerance::T=T(1e-6),
     max_iterations::Int=100,
     amg_max_levels::Int=10,
@@ -57,17 +61,26 @@ function build_quasistatic_solver_plane_strain(
 
     ndof = mesh.ndof
 
-    # Assemble sparse stiffness (2*ndof × 2*ndof)
-    K_sparse = stiffness_assembly_plane_strain(K_el, dof_id, ndof)
+    if verbose
+        println("Building plane-strain AMG preconditioner (materializing K_el from metric weights)...")
+    end
+
+    # Assemble sparse stiffness (2*ndof × 2*ndof) — materializes K_el from weights
+    K_sparse = stiffness_assembly_plane_strain(weights, H, Ht, dof_id, ndof)
     K_reduced = K_sparse[fltni, fltni]
 
     # Build AMG preconditioner
     ml = ruge_stuben(K_reduced, max_levels=amg_max_levels)
     amg_precond = aspreconditioner(ml)
 
-    # Build matrix-free operator
-    stiffness_op = StiffnessOperatorPlaneStrain(K_el, dof_id, mesh.n_elements,
-                                                 ndof, fltni)
+    if verbose
+        println("  AMG levels: ", length(ml.levels))
+        println("  Coarsest level size: ", size(ml.levels[end].A, 1))
+    end
+
+    # Build matrix-free operator (tensor-product, zero-allocation per iteration)
+    stiffness_op = StiffnessOperatorPlaneStrain(weights, H, Ht, dof_id,
+                                                mesh.n_elements, ndof, fltni)
 
     return QuasistaticSolverPlaneStrain(amg_precond, stiffness_op, tolerance,
                                         max_iterations, verbose)
@@ -113,6 +126,8 @@ function quasistatic_step!(state::SimulationStatePlaneStrain{T},
         Vf_new .= copy(Vf_old)
     end
 
+    op = solver.stiffness_op
+
     # Two-pass quasi-static iteration
     for pass in 1:2
         # Step 1: Prescribed displacement on boundaries
@@ -132,21 +147,21 @@ function quasistatic_step!(state::SimulationStatePlaneStrain{T},
         end
 
         # Step 2: Solve K*u = -f for free DOFs
-        # Use operator's pre-allocated y_full buffer to avoid allocation
-        apply_stiffness_plane_strain!(solver.stiffness_op.y_full, state.f,
-                                      solver.stiffness_op.K_el,
-                                      solver.stiffness_op.dof_id, mesh.n_elements, ndof)
-        rhs = solver.stiffness_op.y_full[solver.stiffness_op.fltni]
+        # Use operator's pre-allocated y_full buffer for K*f (rhs)
+        apply_stiffness_plane_strain!(op.y_full, state.f,
+                                      op.weights, op.H, op.Ht,
+                                      op.dof_id, mesh.n_elements, ndof)
+        rhs = op.y_full[op.fltni]
 
         # Warm-start CG from previous displacement (critical after dynamic→QS transition)
-        x0 = state.u_prev[solver.stiffness_op.fltni]
-        u_sol, history = cg!(x0, solver.stiffness_op, -rhs,
+        x0 = state.u_prev[op.fltni]
+        u_sol, history = cg!(x0, op, -rhs,
                             Pl=solver.preconditioner,
                             reltol=solver.tolerance,
                             maxiter=solver.max_iterations,
                             log=true)
 
-        state.u[solver.stiffness_op.fltni] .= u_sol
+        state.u[op.fltni] .= u_sol
 
         if any(isnan.(u_sol)) || any(isinf.(u_sol))
             @error "Non-finite values in plane-strain CG solution" pass iteration=state.iteration
@@ -166,9 +181,9 @@ function quasistatic_step!(state::SimulationStatePlaneStrain{T},
 
         # Step 3: Compute fault traction from K*u
         fill!(state.a, zero(T))
-        apply_stiffness_plane_strain!(state.a, state.u, solver.stiffness_op.K_el,
-                                      solver.stiffness_op.dof_id, mesh.n_elements, ndof)
-        # Note: state.a is separate from the operator workspaces, no aliasing issue
+        apply_stiffness_plane_strain!(state.a, state.u,
+                                      op.weights, op.H, op.Ht,
+                                      op.dof_id, mesh.n_elements, ndof)
 
         # Zero force on creep boundary
         state.a[creep_id] .= 0

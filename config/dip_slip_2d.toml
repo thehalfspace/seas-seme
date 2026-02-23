@@ -9,7 +9,7 @@ day2sec = 86400.0                   # Seconds per day (24 * 3600)
 
 [simulation]
 name = "dip_slip_2d"
-total_time_years = 210.0             # Total simulation time in years
+total_time_years = 310.0             # Total simulation time in years
 output_dir = "./data"               # Base output directory
 
 [mesh]

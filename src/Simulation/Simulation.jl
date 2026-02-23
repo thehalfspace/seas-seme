@@ -29,7 +29,9 @@ Container for all simulation components. Parameterized on:
 - `io_manager`: I/O manager for output
 - `log_io::IO`: Log file IO stream
 - `M_global::Vector{T}`: Global mass matrix (diagonal)
-- `K_el::Array{T,3}`: Elemental stiffness matrices
+- `weights`: Compact metric weight arrays (MetricWeightsAntiplane or MetricWeightsPlaneStrain)
+- `H::Matrix{T}`: Derivative matrix (shared across elements)
+- `Ht::Matrix{T}`: H' (pre-transposed)
 
 # Usage
 ```julia
@@ -38,7 +40,7 @@ sim = build_simulation(config)
 run!(sim)
 ```
 """
-struct Simulation{T<:AbstractFloat, S, QS, DS}
+struct Simulation{T<:AbstractFloat, S, QS, DS, W}
     config::SimulationConfig
     mesh::UnstructuredSEMesh{T}
     physics::MaterialProperties{T}
@@ -51,19 +53,21 @@ struct Simulation{T<:AbstractFloat, S, QS, DS}
     io_manager
     log_io::IO
     M_global::Vector{T}
-    K_el::Array{T,3}
+    weights::W          # MetricWeightsAntiplane{T} or MetricWeightsPlaneStrain{T}
+    H::Matrix{T}
+    Ht::Matrix{T}
 end
 
 
 """
     _finish_simulation(config, mesh, physics, ics, params, state, qs_solver, dyn_solver,
-                       dt_min, M_global, K_el, log_io, label)
+                       dt_min, M_global, weights, H, Ht, log_io, label)
 
 Shared tail for both builder variants: configure timestepper, save parameters,
 create IO manager, and print summary. Called after all formulation-specific steps.
 """
 function _finish_simulation(config, mesh, physics, ics, params, state, qs_solver,
-                             dyn_solver, dt_min, M_global, K_el, log_io, label)
+                             dyn_solver, dt_min, M_global, weights, H, Ht, log_io, label)
     T = eltype(M_global)
 
     # 7. Build timestepper
@@ -108,7 +112,7 @@ function _finish_simulation(config, mesh, physics, ics, params, state, qs_solver
     return Simulation(
         config, mesh, physics, ics, params,
         state, qs_solver, dyn_solver, timestepper,
-        io_manager, log_io, M_global, K_el
+        io_manager, log_io, M_global, weights, H, Ht
     )
 end
 
@@ -128,7 +132,7 @@ Build complete simulation from configuration.
 # Process
 1. Load mesh
 2. Build mesh connectivity, geometry, boundaries
-3. Compute mass and stiffness matrices
+3. Compute mass matrices and metric weights
 4. Generate initial conditions
 5. Build solvers (QS with AMG, dynamic)
 6. Initialize simulation state
@@ -154,7 +158,7 @@ end
 """
     build_simulation_antiplane(config; T=Float64) -> Simulation
 
-Build antiplane (SH) simulation. This is the original build path, unchanged.
+Build antiplane (SH) simulation using tensor-product metric weights.
 """
 function build_simulation_antiplane(config::SimulationConfig; T::Type=Float64)
     # Setup logging to both console and file
@@ -181,13 +185,17 @@ function build_simulation_antiplane(config::SimulationConfig; T::Type=Float64)
     @printf("  Shear velocity: %.1f m/s\n", physics.vs)
     @printf("  Shear modulus: %.2e Pa\n", physics.μ)
 
-    # 3. Build mass and stiffness matrices
+    # 3. Build mass matrices and metric weights
     println("\n[3/8] Computing elemental matrices...")
     basis = LobattoLegendreBasis(mesh.polynomial_degree)
 
     M_el, M_global = build_mass_matrices(mesh, physics, basis)
-    K_el = build_stiffness_matrices(mesh, physics, basis)
-    @printf("  Mass and stiffness matrices computed\n")
+    weights = build_metric_weights_antiplane(mesh, physics, basis)
+
+    # Derivative matrix (shared across all elements)
+    H  = Matrix{T}(basis.derivative_matrix')   # D^T
+    Ht = Matrix{T}(basis.derivative_matrix)    # D (transpose of H)
+    @printf("  Mass matrices and antiplane metric weights computed\n")
 
     # 4. Adjust mass matrix for absorbing boundaries
     println("\n[4/8] Applying boundary conditions...")
@@ -228,7 +236,7 @@ function build_simulation_antiplane(config::SimulationConfig; T::Type=Float64)
 
     # Quasi-static solver with AMG preconditioner
     qs_solver = build_quasistatic_solver(
-        K_el, mesh.dof_id, mesh, fltni,
+        weights, H, Ht, mesh.dof_id, mesh, fltni,
         tolerance=T(config.solvers.quasistatic.tolerance),
         max_iterations=config.solvers.quasistatic.max_iterations,
         amg_max_levels=config.solvers.quasistatic.amg_max_levels,
@@ -249,7 +257,7 @@ function build_simulation_antiplane(config::SimulationConfig; T::Type=Float64)
     @printf("  Initial max slip rate: %.3e m/s\n", maximum_fault_slip_rate(state))
 
     return _finish_simulation(config, mesh, physics, ics, params, state,
-                              qs_solver, dyn_solver, dt_min, M_global, K_el,
+                              qs_solver, dyn_solver, dt_min, M_global, weights, H, Ht,
                               log_io, "Antiplane")
 end
 
@@ -258,6 +266,7 @@ end
     build_simulation_plane_strain(config; T=Float64) -> Simulation
 
 Build plane-strain (P-SV) simulation with 2-component displacement.
+Uses tensor-product metric weights for efficient matvec.
 """
 function build_simulation_plane_strain(config::SimulationConfig; T::Type=Float64)
     _, log_io = setup_logging(config)
@@ -290,13 +299,17 @@ function build_simulation_plane_strain(config::SimulationConfig; T::Type=Float64
     @printf("  Lamé λ: %.2e Pa\n", physics.λ)
     @printf("  Poisson's ratio: %.3f\n", physics.ν)
 
-    # 3. Build mass and stiffness matrices
+    # 3. Build mass matrices and metric weights
     println("\n[3/9] Computing elemental matrices (plane-strain)...")
     basis = LobattoLegendreBasis(mesh.polynomial_degree)
 
     M_el, M_global = build_mass_matrices_plane_strain(mesh, physics, basis)
-    K_el = build_stiffness_matrices_plane_strain(mesh, physics, basis)
-    @printf("  Plane-strain mass and stiffness matrices computed\n")
+    weights = build_metric_weights_plane_strain(mesh, physics, basis)
+
+    # Derivative matrix (shared across all elements)
+    H  = Matrix{T}(basis.derivative_matrix')   # D^T
+    Ht = Matrix{T}(basis.derivative_matrix)    # D (transpose of H)
+    @printf("  Plane-strain mass matrices and metric weights computed\n")
 
     ndof = mesh.ndof
 
@@ -363,7 +376,7 @@ function build_simulation_plane_strain(config::SimulationConfig; T::Type=Float64
     deleteat!(fltni, sort(interface_id_2n))
 
     qs_solver = build_quasistatic_solver_plane_strain(
-        K_el, mesh.dof_id, mesh, fltni,
+        weights, H, Ht, mesh.dof_id, mesh, fltni,
         tolerance=T(config.solvers.quasistatic.tolerance),
         max_iterations=config.solvers.quasistatic.max_iterations,
         amg_max_levels=config.solvers.quasistatic.amg_max_levels,
@@ -385,6 +398,6 @@ function build_simulation_plane_strain(config::SimulationConfig; T::Type=Float64
             config.physics.dip_angle, config.physics.loading_direction)
 
     return _finish_simulation(config, mesh, physics, ics, params, state,
-                              qs_solver, dyn_solver, dt_min, M_global, K_el,
+                              qs_solver, dyn_solver, dt_min, M_global, weights, H, Ht,
                               log_io, "Plane-Strain")
 end

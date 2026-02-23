@@ -57,6 +57,7 @@ include("Discretization/MassMatrix.jl")
 include("Discretization/StiffnessMatrix.jl")
 include("Discretization/StiffnessMatrixPlaneStrain.jl")
 include("Discretization/MassMatrixPlaneStrain.jl")
+include("Discretization/MetricWeights.jl")
 include("Discretization/MatrixFreeOperator.jl")
 include("Discretization/Discretization.jl")
 

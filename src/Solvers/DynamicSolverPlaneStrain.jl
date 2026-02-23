@@ -36,14 +36,14 @@ end
 
 """
     dynamic_step!(state::SimulationStatePlaneStrain, solver, mesh, physics, ics,
-                  params, M_global, K_el, dof_id)
+                  params, M_global, weights, H, Ht, dof_id)
 
 Perform one dynamic time step using leap-frog integration (plane-strain).
 
 # Algorithm (Kaneko et al. 2008, Appendix B, extended to 2-component)
 1. Update displacement: u[n+1] = u[n] + dt*v[n] + 0.5*dt²*a[n]
 2. Partial velocity: v[n+1/2] = v[n] + 0.5*dt*a[n]
-3. Internal forces: f = -K*u[n+1]
+3. Internal forces: f = -K*u[n+1] (via tensor-product matvec)
 4. Absorbing BC (S-wave damping, both components)
 5. Compute stick traction (tangential free velocity)
 6. Update state variable
@@ -55,7 +55,9 @@ Perform one dynamic time step using leap-frog integration (plane-strain).
 function dynamic_step!(state::SimulationStatePlaneStrain{T},
                        solver::DynamicSolverPlaneStrain{T},
                        mesh, physics, ics, params,
-                       M_global::Vector{T}, K_el::Array{T,3},
+                       M_global::Vector{T},
+                       weights::MetricWeightsPlaneStrain{T},
+                       H::Matrix{T}, Ht::Matrix{T},
                        dof_id::Array{Int,3}) where T<:AbstractFloat
 
     dt = solver.dt_min
@@ -87,8 +89,8 @@ function dynamic_step!(state::SimulationStatePlaneStrain{T},
     state.v .= state.v .+ (T(0.5) * dt) .* state.a
     fill!(state.a, zero(T))
 
-    # Step 3: Internal forces -K*u
-    apply_stiffness_plane_strain!(state.a, state.u, K_el, dof_id, mesh.n_elements, ndof)
+    # Step 3: Internal forces -K*u via tensor-product matvec
+    apply_stiffness_plane_strain!(state.a, state.u, weights, H, Ht, dof_id, mesh.n_elements, ndof)
     state.a .= -state.a
 
     # Zero force on creep boundary
@@ -97,9 +99,7 @@ function dynamic_step!(state::SimulationStatePlaneStrain{T},
 
     # Step 4: Absorbing BC (S-wave damping for both components)
     # Phase 1: simplified — treat as scalar impedance per component
-    # f_absorb_x -= absorb_mat * v_x
-    # f_absorb_y -= absorb_mat * v_y
-    for i in eachindex(absorbing_id)
+    @inbounds for i in eachindex(absorbing_id)
         nid = absorbing_id[i]
         state.a[nid]        -= absorb_matrix[i] * state.v[nid]
         state.a[ndof + nid] -= absorb_matrix[i] * state.v[ndof + nid]

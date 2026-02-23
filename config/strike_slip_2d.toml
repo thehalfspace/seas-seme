@@ -13,7 +13,7 @@ total_time_years = 400.0             # Total simulation time in years
 output_dir = "./data"               # Base output directory (simulation folder created inside)
 
 [mesh]
-file = "./data/mesh/homogeneous/homogeneous.mesh"     # HOHQMesh mesh file
+file = "./data/mesh/homogeneous_lowres/homogeneous.mesh"     # HOHQMesh mesh file
 #file = "./data/mesh/amr/unstructured_amr.mesh"     # HOHQMesh mesh file
 polynomial_degree = 4               # Spectral element polynomial degree (p=4)
 

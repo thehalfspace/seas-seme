@@ -2,6 +2,11 @@
 Stiffness matrix computation for spectral elements.
 
 Implements elemental stiffness matrices for antiplane shear (SH waves).
+
+NOTE: The primary interface is now `build_metric_weights_antiplane` which returns
+compact MetricWeightsAntiplane arrays for use with tensor-product matvec.
+The old `build_stiffness_matrices` (full K_el) is retained for reference but is
+no longer called in the main simulation path.
 """
 
 """

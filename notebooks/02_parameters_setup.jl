@@ -40,7 +40,7 @@ Specify the simulation directory and parameter files location.
 # ╔═╡ aee6645e-f699-4a7c-8a05-46ee0b9fe545
 begin
 	# Set simulation directory
-	simulation_name = "dip_slip_2d"
+	simulation_name = "strike_slip_2d_test"
 	base_dir = joinpath(dirname(pwd()), "data")
 	sim_dir = joinpath(base_dir, simulation_name)
 	params_dir = joinpath(sim_dir, "params")

@@ -80,7 +80,9 @@ function save_checkpoint!(simulation, config; emergency::Bool=false)
 
         # Matrices
         M_global = simulation.M_global,
-        K_el = simulation.K_el,
+        weights  = simulation.weights,
+        H        = simulation.H,
+        Ht       = simulation.Ht,
 
         # Metadata
         save_time = now(),
@@ -137,7 +139,9 @@ function load_checkpoint(filepath::String, mesh)
     dyn_solver = ckpt["dyn_solver"]
     timestepper = ckpt["timestepper"]
     M_global = ckpt["M_global"]
-    K_el = ckpt["K_el"]
+    weights  = ckpt["weights"]
+    H        = ckpt["H"]
+    Ht       = ckpt["Ht"]
 
     # Verify mesh compatibility
     if mesh.ndof != ckpt["mesh_ndof"] ||
@@ -170,7 +174,7 @@ function load_checkpoint(filepath::String, mesh)
     simulation = Simulation(
         config, mesh, physics, ics, params,
         state, qs_solver, dyn_solver, timestepper,
-        io_manager, log_io, M_global, K_el
+        io_manager, log_io, M_global, weights, H, Ht
     )
 
     # Display checkpoint info

@@ -42,14 +42,14 @@ end
 
 
 """
-    dynamic_step!(state, solver, mesh, physics, ics, params, M_global, K_el, dof_id)
+    dynamic_step!(state, solver, mesh, physics, ics, params, M_global, weights, H, Ht, dof_id)
 
 Perform one dynamic time step using leap-frog integration.
 
 # Algorithm (Kaneko et al. 2008, Appendix B)
 1. Update displacement: u[n+1] = u[n] + dt*v[n] + 0.5*dt²*a[n]
 2. Partial velocity update: v[n+1/2] = v[n] + 0.5*dt*a[n]
-3. Compute internal forces: f_int = -K*u[n+1]
+3. Compute internal forces: f_int = -K*u[n+1] (via tensor-product matvec)
 4. Apply absorbing boundary conditions
 5. Compute stick traction (free velocity) on fault
 6. Update fault state variable
@@ -69,7 +69,9 @@ Perform one dynamic time step using leap-frog integration.
 - `ics`: Initial conditions
 - `params`: Simulation parameters
 - `M_global`: Global mass matrix (diagonal)
-- `K_el`: Elemental stiffness matrices
+- `weights::MetricWeightsAntiplane{T}`: Compact metric weights
+- `H::Matrix{T}`: Derivative matrix
+- `Ht::Matrix{T}`: H' (pre-transposed)
 - `dof_id`: DOF connectivity
 
 # Modifies
@@ -78,7 +80,9 @@ Perform one dynamic time step using leap-frog integration.
 - `state.fault_vfree`: Stick traction workspace
 """
 function dynamic_step!(state, solver::DynamicSolver{T}, mesh, physics, ics,
-                      params, M_global::Vector{T}, K_el::Array{T,3},
+                      params, M_global::Vector{T},
+                      weights::MetricWeightsAntiplane{T},
+                      H::Matrix{T}, Ht::Matrix{T},
                       dof_id::Array{Int,3}) where T<:AbstractFloat
 
     dt = solver.dt_min
@@ -108,16 +112,17 @@ function dynamic_step!(state, solver::DynamicSolver{T}, mesh, physics, ics,
     state.v .= state.v .+ (0.5 * dt) .* state.a
     fill!(state.a, zero(T))
 
-    # Step 3: Internal forces -K*u[n+1]
-    state.a .= apply_stiffness!(state.a, state.u, K_el, dof_id, mesh.n_elements)
+    # Step 3: Internal forces -K*u[n+1] via tensor-product matvec
+    apply_stiffness!(state.a, state.u, weights, H, Ht, dof_id, mesh.n_elements)
     state.a .= -state.a
 
     # Enforce zero force on creep boundary
     state.a[creep_id] .= 0
 
     # Apply absorbing boundary conditions (Lysmer dampers)
-    state.a[absorbing_id] .= state.a[absorbing_id] .-
-                             (absorb_matrix .* state.v[absorbing_id])
+    @inbounds @simd for i in eachindex(absorbing_id)
+        state.a[absorbing_id[i]] -= absorb_matrix[i] * state.v[absorbing_id[i]]
+    end
 
     #--------------------------------------------------
     # Rate-state fault boundary
@@ -125,8 +130,10 @@ function dynamic_step!(state, solver::DynamicSolver{T}, mesh, physics, ics,
 
     # Step 4: Compute stick traction (free velocity if no friction)
     # FaultVFree = 2*v[n+1/2] + dt*a_internal/M
-    state.fault_vfree .= 2 .* state.v[fault_id] .+
-                        dt .* state.a[fault_id] ./ M_global[fault_id]
+    @inbounds for i in eachindex(fault_id)
+        fid = fault_id[i]
+        state.fault_vfree[i] = 2 * state.v[fid] + dt * state.a[fid] / M_global[fid]
+    end
 
     # Fault slip rate from previous timestep (for state update)
     Vf_prev = 2 .* state.v_prev[fault_id] .+ params.Vpl
@@ -211,7 +218,9 @@ function dynamic_step!(state, solver::DynamicSolver{T}, mesh, physics, ics,
     state.τf .= state.τf .- ics.τo
 
     # Step 8: Apply fault traction to force vector
-    state.a[fault_id] .= state.a[fault_id] .- fault_matrix .* state.τf
+    @inbounds @simd for i in eachindex(fault_id)
+        state.a[fault_id[i]] -= fault_matrix[i] * state.τf[i]
+    end
 
     #--------------------------------------------------
     # End of fault boundary

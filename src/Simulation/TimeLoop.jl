@@ -103,7 +103,8 @@ function run!(simulation)
                                  state.timestep)
             else  # :dynamic
                 dynamic_step!(state, dyn_solver, mesh, physics, ics, params,
-                             simulation.M_global, simulation.K_el, mesh.dof_id)
+                             simulation.M_global, simulation.weights,
+                             simulation.H, simulation.Ht, mesh.dof_id)
             end
 
             # Update time
